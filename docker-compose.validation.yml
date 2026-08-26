@@ -1,0 +1,61 @@
+# Real-gateway validation stack — NOT for production use.
+#
+# SUPERSEDED. The gateway is now a first-class `openwa` service in docker-compose.yml, so the normal
+# stack already runs a real gateway and this file is not part of any deployment path. It is kept
+# only for the isolated pairing experiments the Phase 5 reports describe, where a throwaway session
+# volume matters. For production use docker-compose.yml + docker-compose.prod.yml.
+#
+# Runs the actual OpenWA gateway from `gateway/` on the Support CRM network so Support CRM can talk
+# to it over HTTP and receive real, real-signed webhooks.
+#
+# SAFETY. This stack is isolated by construction:
+#   * Its own named volume (`openwa_validation_data`), created empty. It contains NO WhatsApp
+#     session, so it cannot resume, disturb, or even see any existing pairing.
+#   * Published on 127.0.0.1 only.
+#   * It must only ever be paired with a DEDICATED NON-PRODUCTION test number. Never the production
+#     account, and never a number the legacy Support Message Automation system controls — two
+#     systems on one account send customers duplicate replies (docs/adr/0001 §12).
+#
+# Bring up with:
+#   docker compose -f docker-compose.yml -f docker-compose.validation.yml up -d openwa-validation
+# Tear down (and destroy the session volume) with:
+#   docker compose -f docker-compose.yml -f docker-compose.validation.yml down -v
+
+services:
+  openwa-validation:
+    build:
+      context: ./gateway
+      dockerfile: Dockerfile
+    container_name: openwa-validation
+    restart: unless-stopped
+    stop_grace_period: 45s
+    environment:
+      NODE_ENV: production
+      PORT: 2785
+      LOG_LEVEL: debug
+      # SQLite for both connections. The gateway's own storage is deliberately NOT pointed at
+      # Support CRM's Postgres — the two systems keep separate databases (docs/adr/0001 §7).
+      DATA_DATABASE_TYPE: sqlite
+      # Swagger on: the validation reads the live contract from the running gateway and compares it
+      # against what the adapter was written against.
+      ENABLE_SWAGGER: 'true'
+      # Documented opt-out (gateway/src/common/security/ssrf-guard.ts:46) for delivering to an
+      # internal sidecar. Required here because Support CRM is reachable only on the Docker network,
+      # which the guard would otherwise refuse as a private address. Validation-only.
+      WEBHOOK_SSRF_PROTECT: 'false'
+      # Never enable the gateway's own automation engine (docs/adr/0001 §6).
+      MCP_ENABLED: 'false'
+    volumes:
+      - openwa_validation_data:/app/data
+    ports:
+      - '127.0.0.1:2785:2785'
+    # Chromium needs shared memory; the default 64MB makes it crash on page load.
+    shm_size: '1gb'
+    security_opt:
+      - 'no-new-privileges:true'
+    networks:
+      - support_crm_net
+
+volumes:
+  openwa_validation_data:
+    name: openwa_validation_data

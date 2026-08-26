@@ -1,0 +1,17 @@
+# Never ship host artifacts into the image. Beyond size, copying the host's node_modules over the
+# container's would clobber the install performed inside the build stage — pnpm's node_modules is a
+# tree of symlinks into a store that does not exist in the image.
+**/node_modules
+**/dist
+**/coverage
+**/.next
+
+# The gateway is a separate service with its own Dockerfile; it must never be baked into this image.
+gateway
+
+.git
+.env
+.env.*
+!.env.example
+**/*.log
+docs

@@ -1,0 +1,100 @@
+# Production overlay.
+#
+# Used with the base file, never alone:
+#   docker compose -f docker-compose.yml -f docker-compose.prod.yml up -d
+#
+# Naming the files explicitly is what matters here: Compose only auto-loads docker-compose.override
+# .yml (the debug ports for postgres/redis/api) when no -f is given, so invoking the stack this way
+# never publishes those debug ports at all — only `web`'s 12000 reaches the host.
+#
+# What this overlay changes, and why (`PROJECT_SPEC.md` §150, §151, §201):
+#
+#   * **Nothing is published to the host except the console.** Postgres, Redis and the API are
+#     reachable only on the compose network. A database published on a host port is the single most
+#     common way one of these systems ends up on the internet.
+#   * **Swagger is off.** It documents every route including the administrative ones (§201).
+#   * **Restart policies and healthchecks** on everything, so a crashed worker comes back and an
+#     unhealthy container is visible rather than quietly failing.
+#   * **Resource limits**, so one runaway component cannot starve the others on a single host.
+#   * **SESSION_COOKIE_SECURE requires real TLS in front of port 12000.** This overlay does not add
+#     TLS itself (§2: that is handled separately at deploy time, by whatever the operator puts in
+#     front of this host — a load balancer, Cloudflare, a reverse proxy on another box). Apply this
+#     overlay only once that is in place; until then, run the base file alone for plain-HTTP manual
+#     testing, where SESSION_COOKIE_SECURE stays false and login works over `http://.../:12000`.
+#
+# Secrets come from the environment or a secrets manager — never from this file, and never from an
+# image. `.env` is not baked into any layer.
+
+services:
+  postgres:
+    ports: []
+    restart: always
+    command:
+      - postgres
+      # Tuned for the stated scale rather than left at defaults sized for a laptop.
+      - -c
+      - max_connections=200
+      - -c
+      - shared_buffers=512MB
+      - -c
+      - work_mem=16MB
+    deploy:
+      resources:
+        limits:
+          memory: 2G
+
+  redis:
+    ports: []
+    restart: always
+    command:
+      - redis-server
+      - --appendonly
+      - 'yes'
+      # Redis holds locks, rate-limit counters and the queue. Evicting a lock under memory pressure
+      # would let two workers reply to one conversation, so eviction is disabled and the instance is
+      # sized to fit instead.
+      - --maxmemory-policy
+      - noeviction
+    deploy:
+      resources:
+        limits:
+          memory: 1G
+
+  migrate:
+    restart: 'no'
+
+  api:
+    restart: always
+    environment:
+      NODE_ENV: production
+      # Off in production: the schema explorer lists every administrative route (§201).
+      ENABLE_SWAGGER: 'false'
+      SESSION_COOKIE_SECURE: 'true'
+    deploy:
+      resources:
+        limits:
+          memory: 1G
+      replicas: 1
+
+  web:
+    restart: always
+    deploy:
+      resources:
+        limits:
+          memory: 128M
+
+  worker:
+    restart: always
+    environment:
+      NODE_ENV: production
+      RUN_MODE: worker
+      # The API sets this too. It has to be on both: the production validator requires it, and a
+      # worker that fails validation never starts, so no queue is consumed at all.
+      SESSION_COOKIE_SECURE: 'true'
+    deploy:
+      resources:
+        limits:
+          memory: 1G
+      # Safe to raise: every consumer is idempotent, and the conversation lock plus the unique
+      # indexes on decision_logs and escalation_events are what make that true rather than hopeful.
+      replicas: 1

@@ -1,0 +1,27 @@
+{
+  "name": "support-crm",
+  "private": true,
+  "version": "0.1.0",
+  "description": "WhatsApp-first Support CRM built on the OpenWA gateway. See PROJECT_SPEC.md.",
+  "engines": {
+    "node": ">=22"
+  },
+  "packageManager": "pnpm@11.9.0",
+  "scripts": {
+    "dev:api": "pnpm --filter @support-crm/api start:dev",
+    "dev:worker": "pnpm --filter @support-crm/api start:worker:dev",
+    "dev:web": "pnpm --filter @support-crm/web dev",
+    "build": "pnpm --filter @support-crm/api build && pnpm --filter @support-crm/web build",
+    "lint": "pnpm --filter @support-crm/api lint && pnpm --filter @support-crm/web lint",
+    "typecheck": "pnpm --filter @support-crm/api typecheck && pnpm --filter @support-crm/web typecheck",
+    "test": "pnpm --filter @support-crm/api test && pnpm --filter @support-crm/web test",
+    "test:integration": "pnpm --filter @support-crm/api test:integration",
+    "db:migrate": "pnpm --filter @support-crm/api migration:run",
+    "db:revert": "pnpm --filter @support-crm/api migration:revert",
+    "db:seed": "pnpm --filter @support-crm/api seed",
+    "infra:up": "docker compose up -d postgres redis",
+    "infra:down": "docker compose down",
+    "test:infra:up": "docker compose -f docker-compose.test.yml up -d",
+    "test:infra:down": "docker compose -f docker-compose.test.yml down -v"
+  }
+}

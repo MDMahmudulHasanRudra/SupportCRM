@@ -1,0 +1,5 @@
+Fibre Troubleshooting
+
+If the ONT shows a red LOS light, the fibre between the premises and the cabinet is broken. Dispatch an engineer.
+
+If the light is green but there is no internet, restart the router first.

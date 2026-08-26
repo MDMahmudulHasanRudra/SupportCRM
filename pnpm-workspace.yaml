@@ -1,0 +1,20 @@
+packages:
+  - "apps/*"
+
+# pnpm blocks dependency postinstall scripts by default (a supply-chain gate) and exits non-zero
+# until each one is explicitly decided. Both below are deliberately set to FALSE — blocked, not
+# approved — so the decision is recorded and the install succeeds.
+#
+#   @scarf/scarf     — a telemetry/analytics beacon pulled in transitively. Nothing needs it, and a
+#                      package that phones home on install has no place in a build that will handle
+#                      customer support conversations (PROJECT_SPEC.md §110).
+#   msgpackr-extract — an OPTIONAL native accelerator for msgpackr (a bullmq dependency). Skipping
+#                      it avoids a node-gyp compile in the Docker build; msgpackr falls back to its
+#                      pure-JS path, which is correct and fast enough for queue payloads.
+#
+# Anything added here in future must come with a reason, and only something genuinely required for
+# correctness should be set to true.
+allowBuilds:
+  "@scarf/scarf": false
+  esbuild: true
+  msgpackr-extract: false

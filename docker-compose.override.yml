@@ -1,0 +1,23 @@
+# Debug-only host ports for manual testing.
+#
+# Docker Compose loads this file automatically alongside docker-compose.yml whenever you run
+# `docker compose up` without naming files explicitly — which is exactly the manual-testing command
+# in the README. A real deployment that names its files (`-f docker-compose.yml -f
+# docker-compose.prod.yml`) never loads this file, so none of these ports ever reach a production
+# host.
+#
+# All three bind to 127.0.0.1 only — reachable from this machine for `psql`/`redis-cli`/curl-ing the
+# API directly, never from the network.
+
+services:
+  postgres:
+    ports:
+      - "127.0.0.1:${POSTGRES_DEBUG_PORT:-12002}:5432"
+
+  redis:
+    ports:
+      - "127.0.0.1:${REDIS_DEBUG_PORT:-12003}:6379"
+
+  api:
+    ports:
+      - "127.0.0.1:${API_DEBUG_PORT:-12001}:4000"

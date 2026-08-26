@@ -1,0 +1,19 @@
+Read PROJECT_SPEC.md completely before making any code changes.
+
+PROJECT_SPEC.md is the canonical source of truth for this project.
+
+First perform Phase 0 repository and OpenWA architecture audit.
+
+Do not implement the full product yet.
+
+Inspect the existing repository, understand what can be reused, identify integration boundaries, database changes, event/queue architecture, and potential conflicts.
+
+Then create:
+- docs/ARCHITECTURE_AUDIT.md
+- docs/IMPLEMENTATION_PLAN.md
+
+Do not make destructive changes.
+
+Do not skip the audit.
+
+After the audit is complete, wait for the next implementation instruction.

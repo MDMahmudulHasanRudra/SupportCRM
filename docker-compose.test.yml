@@ -1,0 +1,35 @@
+# Isolated Postgres + Redis for integration tests.
+#
+# A separate compose project on different ports, so `pnpm test:integration` can never run against
+# the development stack — the integration suite truncates tables, and pointing it at a database
+# someone was using is a bad afternoon.
+#
+# Ephemeral by design: no named volumes, so `pnpm test:infra:down` leaves nothing behind.
+
+services:
+  postgres-test:
+    image: pgvector/pgvector:pg16
+    environment:
+      POSTGRES_USER: support_crm_test
+      POSTGRES_PASSWORD: support_crm_test
+      POSTGRES_DB: support_crm_test
+    ports:
+      - "127.0.0.1:55432:5432"
+    # tmpfs storage: the whole database lives in RAM. Tests get faster and nothing survives teardown.
+    tmpfs:
+      - /var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U support_crm_test -d support_crm_test"]
+      interval: 3s
+      timeout: 3s
+      retries: 20
+
+  redis-test:
+    image: redis:7-alpine
+    ports:
+      - "127.0.0.1:56379:6379"
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 3s
+      timeout: 3s
+      retries: 20

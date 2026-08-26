@@ -1,0 +1,284 @@
+# Support CRM — single-host stack. This file alone is the whole deployment, self-contained: no host
+# nginx, no separate reverse-proxy container, nothing else to install.
+#
+# Services: postgres, redis, a one-shot migrate+seed, the API, the worker, web (the console, which
+# also proxies /api and /socket.io to the API — see apps/web/nginx.conf), and openwa (the WhatsApp
+# gateway). Only web publishes a host port (12000 by default); everything else, the gateway
+# included, is reachable exclusively on the compose network.
+#
+# The gateway is built from `gateway/` in this repository and started here, so one command produces
+# a deployment an operator can pair a phone with. `gateway/docker-compose.yml` still exists for
+# running it standalone — do not run both against the same volume, or two systems end up driving one
+# WhatsApp account (docs/adr/0001 §12).
+#
+# PROJECT_SPEC.md §150–151: persistent volumes, health checks, restart policies, env configuration.
+
+services:
+  postgres:
+    # pgvector's own image rather than plain postgres:16 — same PostgreSQL major version, plus the
+    # `vector` extension that Phase 4's knowledge embeddings require. The Phase 1 migration creates
+    # the extension conditionally, so a plain image still boots; it just cannot do semantic search.
+    image: pgvector/pgvector:pg16
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: ${POSTGRES_USER}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD}
+      POSTGRES_DB: ${POSTGRES_DB}
+    # No host port here: reachable only on the compose network. A debug-only localhost binding is
+    # added by docker-compose.override.yml, which docker compose loads automatically for a plain
+    # `docker compose up` but which a real deployment naming its files explicitly never sees.
+    volumes:
+      - pg_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER} -d ${POSTGRES_DB}"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+    networks: [support_crm_net]
+
+  redis:
+    image: redis:7-alpine
+    restart: unless-stopped
+    # appendonly keeps in-flight queue state across a restart. Redis is still not a source of truth
+    # (PROJECT_SPEC.md §184) — this only avoids re-doing work that Postgres already records.
+    command: ["redis-server", "--appendonly", "yes"]
+    # No host port for the same reason as postgres above — see docker-compose.override.yml.
+    volumes:
+      - redis_data:/data
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 5s
+      timeout: 3s
+      retries: 10
+    networks: [support_crm_net]
+
+  # One-shot. Applies migrations then seeds; both are idempotent, so this runs on every `up`.
+  # Separate from the API so several API replicas never race to migrate the same database.
+  migrate:
+    build:
+      context: .
+      dockerfile: apps/api/Dockerfile
+    depends_on:
+      postgres:
+        condition: service_healthy
+    environment: &app_env
+      NODE_ENV: ${NODE_ENV:-development}
+      TZ: ${TZ:-Asia/Dhaka}
+      DATABASE_HOST: postgres
+      DATABASE_PORT: 5432
+      DATABASE_USER: ${DATABASE_USER}
+      DATABASE_PASSWORD: ${DATABASE_PASSWORD}
+      DATABASE_NAME: ${DATABASE_NAME}
+      REDIS_HOST: redis
+      REDIS_PORT: 6379
+      REDIS_KEY_PREFIX: ${REDIS_KEY_PREFIX:-support-crm}
+      SECRET_ENCRYPTION_KEY: ${SECRET_ENCRYPTION_KEY}
+      SESSION_COOKIE_SECRET: ${SESSION_COOKIE_SECRET}
+      SESSION_COOKIE_SECURE: ${SESSION_COOKIE_SECURE:-false}
+      CORS_ORIGINS: ${CORS_ORIGINS:-http://localhost:3000}
+      ENABLE_SWAGGER: ${ENABLE_SWAGGER:-true}
+      SEED_ADMIN_USERNAME: ${SEED_ADMIN_USERNAME:-admin}
+      SEED_ADMIN_EMAIL: ${SEED_ADMIN_EMAIL:-admin@example.com}
+      SEED_ADMIN_PASSWORD: ${SEED_ADMIN_PASSWORD:-ChangeMe!123}
+      # What the gateway is told to POST webhooks to. It must be reachable FROM THE GATEWAY, so
+      # inside compose it is the service name — `localhost` there means the gateway itself, and
+      # inbound messages would silently never arrive.
+      API_BASE_URL: ${API_BASE_URL:-http://api:4000}
+      # Uploaded knowledge documents. Backed by the storage_data volume on api and worker; both
+      # must agree, because the API writes the file and the worker parses and indexes it.
+      STORAGE_LOCAL_PATH: /app/storage
+      OPENWA_BASE_URL: ${OPENWA_BASE_URL:-http://openwa:2785}
+      OPENWA_API_KEY: ${OPENWA_API_KEY:-}
+      OPENWA_WEBHOOK_SECRET: ${OPENWA_WEBHOOK_SECRET:-}
+    command: ["sh", "-c", "node dist/database/migrate.js && node dist/seed.js"]
+    networks: [support_crm_net]
+
+  api:
+    build:
+      context: .
+      dockerfile: apps/api/Dockerfile
+    restart: unless-stopped
+    depends_on:
+      postgres: { condition: service_healthy }
+      redis: { condition: service_healthy }
+      migrate: { condition: service_completed_successfully }
+    environment:
+      <<: *app_env
+      RUN_MODE: api
+      API_PORT: 4000
+    volumes:
+      - storage_data:/app/storage
+    # No host port: the browser never talks to the API directly, only through the web container's
+    # nginx proxy. A debug-only localhost binding is added by docker-compose.override.yml.
+    healthcheck:
+      test: ["CMD", "node", "-e", "fetch('http://127.0.0.1:4000/api/v1/health/live').then(r=>process.exit(r.ok?0:1)).catch(()=>process.exit(1))"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 15s
+    networks: [support_crm_net]
+
+  # The operator console AND the single public entry point. Its nginx serves the static bundle and
+  # proxies /api and /socket.io to the api service on the compose network (apps/web/nginx.conf) — so
+  # the browser only ever needs one origin and one port, with no separate reverse-proxy container and
+  # nothing to install on the host.
+  web:
+    build:
+      context: .
+      dockerfile: apps/web/Dockerfile
+    restart: unless-stopped
+    depends_on:
+      api: { condition: service_healthy }
+    ports:
+      - "${WEB_PORT:-12000}:80"
+    healthcheck:
+      test: ["CMD", "wget", "-qO-", "http://127.0.0.1/healthz"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 5s
+    networks: [support_crm_net]
+
+  # The WhatsApp gateway (OpenWA), built from `gateway/` in this repository.
+  #
+  # Part of the stack rather than a thing to install separately: `docker compose up` must produce a
+  # deployment an operator can pair a phone with, and requiring them to run a second compose project
+  # first is exactly the manual step this service exists to remove.
+  #
+  # It publishes NO host port. The API reaches it at `http://openwa:2785` on the compose network, and
+  # it reaches the API back at `http://api:4000` for webhooks. Nothing about it is browser-reachable:
+  # the pairing code travels gateway -> API -> browser, never gateway -> browser.
+  #
+  # SQLite on its own volume — the gateway owns its storage, separate from the CRM database, and the
+  # built-in Postgres/Redis/MinIO profiles in `gateway/docker-compose.yml` stay unused.
+  openwa:
+    build:
+      context: ./gateway
+      dockerfile: Dockerfile
+    restart: unless-stopped
+    environment:
+      PORT: 2785
+      NODE_ENV: production
+      LOG_LEVEL: ${OPENWA_LOG_LEVEL:-info}
+      # The same key the CRM sends as X-API-Key. One value, both sides, never in the browser.
+      API_MASTER_KEY: ${OPENWA_API_KEY}
+      # Resume already-authenticated sessions when the gateway boots.
+      #
+      # This is what makes a VPS reboot survivable: without it the container comes back healthy, the
+      # session stays down, and the console goes on reporting the last state it saw — WhatsApp
+      # silently offline while the dashboard claims otherwise. Verified: with it off, a gateway
+      # restart left the session DISCONNECTED for as long as it was watched.
+      #
+      # Only sessions that already hold WhatsApp auth resume, so an unpaired account never starts a
+      # Chromium. Operators running many accounts on a small VPS can set this false and reconnect
+      # each account deliberately from the WhatsApp screen — see docs/DEPLOYMENT.md (memory).
+      AUTO_START_SESSIONS: ${OPENWA_AUTO_START_SESSIONS:-true}
+      DATABASE_TYPE: sqlite
+      DATABASE_NAME: ./data/openwa.sqlite
+      DATABASE_SYNCHRONIZE: 'true'
+      DATABASE_LOGGING: 'false'
+      ENGINE_TYPE: whatsapp-web.js
+      SESSION_DATA_PATH: ./data/sessions
+      PUPPETEER_HEADLESS: 'true'
+      STORAGE_TYPE: local
+      STORAGE_LOCAL_PATH: ./data/media
+      REDIS_ENABLED: 'false'
+      QUEUE_ENABLED: 'false'
+      CACHE_ENABLED: 'false'
+      # The gateway refuses to deliver webhooks to internal addresses (SSRF guard), and `api` is
+      # exactly such an address. The guard stays ON — only the one host Support CRM actually needs is
+      # allowlisted, so a webhook still cannot be pointed at cloud metadata or an arbitrary internal
+      # service. Without this, pairing succeeds but no inbound message ever reaches the CRM.
+      WEBHOOK_SSRF_PROTECT: 'true'
+      SSRF_ALLOWED_HOSTS: ${OPENWA_SSRF_ALLOWED_HOSTS:-api}
+      # Writable HOME/XDG on tmpfs: the rootfs is read-only and Chromium writes relative to both.
+      HOME: /tmp
+      XDG_CONFIG_HOME: /tmp/.config
+      XDG_CACHE_HOME: /tmp/.cache
+    volumes:
+      # Everything that makes a paired session survive a restart: the WhatsApp auth state, the
+      # gateway's SQLite database, and stored media. Losing this volume means scanning a QR again.
+      - openwa_data:/app/data
+    # Container hardening, matching the gateway's own compose. Chromium runs with --no-sandbox, so
+    # the container is the confinement boundary.
+    security_opt:
+      - 'no-new-privileges:true'
+    cap_drop:
+      - ALL
+    cap_add:
+      - CHOWN
+      - DAC_OVERRIDE
+      - FOWNER
+      - SETGID
+      - SETUID
+    read_only: true
+    tmpfs:
+      - /tmp
+    # Chromium is multi-process; WhatsApp Web is process-heavy. 2048 fits several sessions with
+    # startup headroom. Never -1 — that drops the fork-bomb guard.
+    pids_limit: ${OPENWA_PIDS_LIMIT:-2048}
+    # Raise for more concurrent sessions. Too low and Chromium is OOM-killed mid-pairing (exit 137).
+    mem_limit: ${OPENWA_MEM_LIMIT:-2g}
+    # Chromium's default 64MB /dev/shm is not enough for WhatsApp Web; the engine is launched with
+    # --disable-dev-shm-usage, and this gives it real shared memory rather than relying on that alone.
+    shm_size: ${OPENWA_SHM_SIZE:-512m}
+    # Chromium needs a while to boot before the session API answers.
+    healthcheck:
+      test:
+        [
+          'CMD',
+          'node',
+          '-e',
+          "require('http').get('http://localhost:2785/api/health/ready', (r) => process.exit(r.statusCode === 200 ? 0 : 1)).on('error', () => process.exit(1))",
+        ]
+      interval: 15s
+      timeout: 10s
+      retries: 5
+      start_period: 60s
+    networks: [support_crm_net]
+
+  worker:
+    build:
+      context: .
+      dockerfile: apps/api/Dockerfile
+    restart: unless-stopped
+    depends_on:
+      postgres: { condition: service_healthy }
+      redis: { condition: service_healthy }
+      migrate: { condition: service_completed_successfully }
+    environment:
+      <<: *app_env
+      RUN_MODE: worker
+      WORKER_HEALTH_PORT: 4100
+      WORKER_CONCURRENCY: ${WORKER_CONCURRENCY:-5}
+    # The same volume as the API: it writes an uploaded document, the worker parses and indexes it.
+    volumes:
+      - storage_data:/app/storage
+    command: ["node", "dist/worker.js"]
+    # No published port: the health endpoint binds to 127.0.0.1 for this container's own probe.
+    # Scale with `docker compose up -d --scale worker=3` — the job lock makes that safe.
+    healthcheck:
+      test: ["CMD", "node", "-e", "fetch('http://127.0.0.1:4100/api/v1/health/live').then(r=>process.exit(r.ok?0:1)).catch(()=>process.exit(1))"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 15s
+    networks: [support_crm_net]
+
+volumes:
+  # Uploaded knowledge documents. Without this the files live in the container's writable layer and
+  # are destroyed by the next deploy, leaving indexed chunks pointing at nothing.
+  storage_data:
+    name: support_crm_storage
+  # The WhatsApp gateway's session, database and media. The single most important volume to back
+  # up after the database: losing it means re-pairing every WhatsApp account by QR.
+  openwa_data:
+    name: support_crm_openwa_data
+  pg_data:
+    name: support_crm_pg_data
+  redis_data:
+    name: support_crm_redis_data
+
+networks:
+  support_crm_net:
+    driver: bridge
