@@ -18,6 +18,8 @@ import { KnowledgeDocument } from './entities/knowledge-document.entity';
 import { KnowledgeProfile } from './entities/knowledge-profile.entity';
 import { KnowledgeArticleService } from './knowledge-article.service';
 import { KnowledgeCandidateService } from './knowledge-candidate.service';
+import { GroupKnowledgeHarvestService } from './group-knowledge-harvest.service';
+import { Group } from '../groups/entities/group.entity';
 import { KnowledgeController } from './knowledge.controller';
 import { KnowledgeDocumentService } from './knowledge-document.service';
 import { KnowledgeIndexHandler } from './knowledge-index.handler';
@@ -53,6 +55,9 @@ const isWorker = process.env.RUN_MODE === 'worker';
       KnowledgeDocument,
       KnowledgeProfile,
       KnowledgeCandidate,
+      // Read-only here: the harvester checks each group's opt-in flag in SQL. This module owns no
+      // group state and writes none.
+      Group,
     ]),
     // In-memory uploads with a hard ceiling from configuration, so a rejected file never reaches
     // the disk and a large one cannot exhaust memory.
@@ -77,8 +82,9 @@ const isWorker = process.env.RUN_MODE === 'worker';
     KnowledgeArticleService,
     KnowledgeDocumentService,
     KnowledgeCandidateService,
+    GroupKnowledgeHarvestService,
     ...(isWorker ? [KnowledgeIndexHandler] : []),
   ],
-  exports: [KnowledgeRetrievalService, TypeOrmModule],
+  exports: [KnowledgeRetrievalService, GroupKnowledgeHarvestService, TypeOrmModule],
 })
 export class KnowledgeModule {}

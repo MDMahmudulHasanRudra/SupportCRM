@@ -87,6 +87,44 @@ export class Group {
   @Column({ type: 'boolean', default: false })
   automationEnabled!: boolean;
 
+  /**
+   * Whether this group's messages feed the repeated-question detector.
+   *
+   * Independent of `aiEnabled` on purpose: a group can contribute patterns while being forbidden
+   * from ever receiving an automated reply, and an internal or social group can be excluded from
+   * analysis while still being monitored. Defaults true so existing behaviour is unchanged.
+   */
+  @Column({ type: 'boolean', default: true })
+  patternAnalysisEnabled!: boolean;
+
+  /**
+   * Whether this group's messages may be harvested as knowledge *candidates*.
+   *
+   * Separate from `patternAnalysisEnabled` on purpose, and the distinction is not cosmetic. Pattern
+   * analysis decides whether a group's messages are *counted* to notice that something keeps being
+   * asked. This decides whether their *content* may be put forward as a proposed answer for a
+   * person to review. An operator can reasonably want the first without the second.
+   *
+   * Defaults to false, unlike every other flag here, because there is no existing behaviour to
+   * preserve — nothing harvested group messages before this column existed, and defaulting to true
+   * would start routing customer conversations into a knowledge queue on deploy.
+   *
+   * Opting in does not make anything authoritative: it only permits a candidate to be created, and
+   * a candidate still requires a person to convert it before it becomes knowledge.
+   */
+  @Column({ type: 'boolean', default: false })
+  knowledgeContributionEnabled!: boolean;
+
+  /**
+   * The knowledge profile this group answers from, if it has been given one.
+   *
+   * The column and its foreign key already existed in the schema; the entity simply never declared
+   * it, so TypeORM could not read it back. Nullable: most groups inherit whatever global knowledge
+   * applies rather than being pinned to a profile.
+   */
+  @Column({ type: 'uuid', nullable: true })
+  knowledgeProfileId!: string | null;
+
   @Column({ type: 'timestamptz', nullable: true })
   lastSyncedAt!: Date | null;
 

@@ -25,6 +25,7 @@ import { Message } from '../messaging/entities/message.entity';
 import { EMERGENCY_STOPS, SettingsService } from '../settings/settings.service';
 import { AiRun, AiRunStatus } from './entities/ai-run.entity';
 import { DECISION_SETTINGS, DecisionContextBuilder, type DecisionContext } from './decision-context';
+import { primaryBlocker, type PermissionLayer } from './permission-chain';
 import { AIGatewayService } from '../ai/ai-gateway.service';
 import { AIMemoryService } from '../ai/ai-memory.service';
 import { AIMessageRole } from '../ai/ai-types';
@@ -338,10 +339,13 @@ export class DecisionEngine {
     };
 
     if (!context.aiEnabled) {
+      // Naming the layer turns an unactionable "AI is off" into "change this switch". The gate is
+      // still `context.aiEnabled`; the chain only explains the value it already had.
+      const blocker = primaryBlocker(context.aiChain);
       return {
         outcome: DecisionOutcome.NO_RESPONSE,
-        reasonCode: DecisionReason.AI_DISABLED,
-        reason: 'No rule matched, and AI is switched off here.',
+        reasonCode: AI_DISABLED_BY_LAYER[blocker ?? 'UNKNOWN'],
+        reason: AI_DISABLED_SENTENCE[blocker ?? 'UNKNOWN'],
         ...base,
       };
     }
@@ -640,3 +644,25 @@ function toEffects(actions: RuleAction[]): DecisionEffect[] {
 
   return effects;
 }
+
+
+/**
+ * The reason code for each layer that can withhold AI.
+ *
+ * `UNKNOWN` keeps the general code for the case no layer can be named — better an honest "AI is
+ * off" than a confident claim about a switch that is not the one at fault.
+ */
+const AI_DISABLED_BY_LAYER: Record<PermissionLayer | 'UNKNOWN', DecisionReason> = {
+  GROUP: DecisionReason.AI_DISABLED_GROUP,
+  CONVERSATION: DecisionReason.AI_DISABLED_CONVERSATION,
+  PROFILE: DecisionReason.AI_DISABLED_PROFILE,
+  UNKNOWN: DecisionReason.AI_DISABLED,
+};
+
+/** The same, in words, for the decision trace an operator reads. */
+const AI_DISABLED_SENTENCE: Record<PermissionLayer | 'UNKNOWN', string> = {
+  GROUP: 'No rule matched, and AI is switched off for this group.',
+  CONVERSATION: 'No rule matched, and AI is switched off for this conversation.',
+  PROFILE: 'No rule matched, and AI is switched off by the automation profile.',
+  UNKNOWN: 'No rule matched, and AI is switched off here.',
+};

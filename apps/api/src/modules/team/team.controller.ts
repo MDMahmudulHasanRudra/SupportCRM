@@ -1,6 +1,5 @@
 import { Body, Controller, Get, Param, Patch, Post, Query, Req } from '@nestjs/common';
 import { ApiOperation, ApiTags } from '@nestjs/swagger';
-import { Type } from 'class-transformer';
 import { IsBoolean, IsEnum, IsOptional, IsString, IsUUID, MaxLength, MinLength } from 'class-validator';
 import type { Request } from 'express';
 import { AuditService } from '../audit/audit.service';
@@ -8,6 +7,7 @@ import type { AuthenticatedUser } from '../auth/auth.service';
 import { ChannelKey } from '../channel/entities/channel.entity';
 import { CurrentUser, RequirePermissions } from '../rbac/permissions.guard';
 import { TeamIdentityService } from './team-identity.service';
+import { QueryBoolean } from '../../common/http/query-boolean';
 
 export class CreateIdentityDto {
   @IsEnum(ChannelKey) channelKey!: ChannelKey;
@@ -32,7 +32,7 @@ export class UpdateIdentityDto {
 
 export class ListIdentitiesDto {
   @IsOptional() @IsEnum(ChannelKey) channelKey?: ChannelKey;
-  @IsOptional() @Type(() => Boolean) @IsBoolean() includeInactive?: boolean;
+  @IsOptional() @QueryBoolean() @IsBoolean() includeInactive?: boolean;
 }
 
 /**

@@ -66,6 +66,10 @@ import { SettingsModule } from './modules/settings/settings.module';
         password: config.getOrThrow<string>('database.password'),
         database: config.getOrThrow<string>('database.name'),
         ssl: config.get<boolean>('database.ssl') ? { rejectUnauthorized: false } : false,
+        // One definition of a day across Node and SQL. Without this Postgres runs Etc/UTC while the
+        // application runs its configured TZ, and "today" means two different things depending on
+        // which layer computed it. See the same option in `database/data-source.ts`.
+        extra: { options: `-c timezone=${config.get<string>('timezone') ?? 'UTC'}` },
         logging: config.get<boolean>('database.logging', false),
         entities: [join(__dirname, 'modules', '**', '*.entity.{ts,js}')],
         // Registered so `dataSource.runMigrations()` can be driven programmatically (the migrate

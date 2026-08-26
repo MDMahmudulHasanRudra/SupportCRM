@@ -45,7 +45,17 @@ export class BulkController {
       {
         action: 'bulk.groups_updated',
         resource: 'group',
-        after: { operation: result.operation, totalItems: result.totalItems, jobId: result.jobId },
+        after: {
+          operation: result.operation,
+          totalItems: result.totalItems,
+          jobId: result.jobId,
+          // The selection itself, not only its size. "Enabled AI for 1,842 groups" is not auditable
+          // after the fact — the same filter run tomorrow matches a different set, so the filter has
+          // to be recorded at the moment it was applied. `jobId` then carries the per-group outcome
+          // (succeeded/failed), which the Job Center keeps.
+          selection: dto.groupIds ? { mode: 'EXPLICIT_IDS', count: dto.groupIds.length } : { mode: 'FILTER', filter: dto.filter ?? null },
+          targetId: dto.targetId ?? null,
+        },
       },
       this.audit.actorFromRequest(request, user),
     );

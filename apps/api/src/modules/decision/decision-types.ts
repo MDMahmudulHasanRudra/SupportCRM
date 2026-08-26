@@ -50,7 +50,22 @@ export enum DecisionReason {
   RULE_IGNORE = 'RULE_IGNORE',
   RULE_ESCALATE = 'RULE_ESCALATE',
   NO_RULE_MATCH = 'NO_RULE_MATCH',
+  /**
+   * AI is switched off somewhere in the permission chain.
+   *
+   * Retained as the general case and still emitted when no single layer can be named. Rows written
+   * before the per-layer codes below carry this value, so a query counting "AI was off" should
+   * include it alongside them rather than assume the specific codes cover the whole history.
+   */
   AI_DISABLED = 'AI_DISABLED',
+  /**
+   * The specific layer withholding AI, so the console can say which switch to change instead of
+   * only that something is off. `reasonCode` is a plain varchar column, so these needed no
+   * migration — but they only exist from the moment they were introduced.
+   */
+  AI_DISABLED_GROUP = 'AI_DISABLED_GROUP',
+  AI_DISABLED_CONVERSATION = 'AI_DISABLED_CONVERSATION',
+  AI_DISABLED_PROFILE = 'AI_DISABLED_PROFILE',
   AI_UNAVAILABLE = 'AI_UNAVAILABLE',
   AI_FAILED = 'AI_FAILED',
   AI_ANSWERED = 'AI_ANSWERED',

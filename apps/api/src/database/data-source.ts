@@ -31,6 +31,20 @@ export const dataSourceOptions = {
   password: process.env.DATABASE_PASSWORD ?? 'support_crm',
   database: process.env.DATABASE_NAME ?? 'support_crm',
   ssl: process.env.DATABASE_SSL === 'true' ? { rejectUnauthorized: false } : false,
+  /*
+   * Pin the database session to the application's timezone.
+   *
+   * The application runs with `TZ` set (Asia/Dhaka in this deployment) and Node computes day
+   * boundaries in that zone. Postgres, left alone, runs `Etc/UTC` — so `date_trunc('day', now())`
+   * in SQL and `new Date(y, m, d)` in Node disagreed by six hours, and "today" meant two different
+   * things depending on which one produced a figure. For a Dhaka team that made every "today"
+   * count computed in SQL wrong between midnight and 6am, on screens sitting next to ones that
+   * were right.
+   *
+   * Setting it on the connection rather than converting at each call site means there is one
+   * definition of a day, and a query added later inherits it instead of having to remember.
+   */
+  extra: { options: `-c timezone=${process.env.TZ ?? 'UTC'}` },
   synchronize: false,
   migrationsRun: false,
   logging: process.env.DATABASE_LOGGING === 'true',

@@ -28,9 +28,23 @@ export enum BulkOperation {
   DISABLE_AI = 'DISABLE_AI',
   ENABLE_MONITORING = 'ENABLE_MONITORING',
   DISABLE_MONITORING = 'DISABLE_MONITORING',
+  /**
+   * Whether a group's messages feed the repeated-question detector. Independent of AI: a group can
+   * contribute patterns while being forbidden an automated reply, and the reverse.
+   */
+  ENABLE_PATTERN_ANALYSIS = 'ENABLE_PATTERN_ANALYSIS',
+  DISABLE_PATTERN_ANALYSIS = 'DISABLE_PATTERN_ANALYSIS',
   ASSIGN_AUTOMATION_PROFILE = 'ASSIGN_AUTOMATION_PROFILE',
   ASSIGN_KNOWLEDGE_PROFILE = 'ASSIGN_KNOWLEDGE_PROFILE',
   CLEAR_AUTOMATION_PROFILE = 'CLEAR_AUTOMATION_PROFILE',
+  /** Detaches the knowledge profile, returning the group to whatever global knowledge applies. */
+  CLEAR_KNOWLEDGE_PROFILE = 'CLEAR_KNOWLEDGE_PROFILE',
+  /**
+   * Whether the group's messages may be harvested as knowledge *candidates* for review. Distinct
+   * from pattern analysis, which only counts repetition — this concerns their content.
+   */
+  ENABLE_KNOWLEDGE_COLLECTION = 'ENABLE_KNOWLEDGE_COLLECTION',
+  DISABLE_KNOWLEDGE_COLLECTION = 'DISABLE_KNOWLEDGE_COLLECTION',
 }
 
 export interface BulkRequest {
@@ -140,6 +154,12 @@ export class BulkOperationsService {
       case BulkOperation.DISABLE_MONITORING:
         patch.monitoringState = 'IGNORED';
         break;
+      case BulkOperation.ENABLE_PATTERN_ANALYSIS:
+        patch.patternAnalysisEnabled = true;
+        break;
+      case BulkOperation.DISABLE_PATTERN_ANALYSIS:
+        patch.patternAnalysisEnabled = false;
+        break;
       case BulkOperation.ASSIGN_AUTOMATION_PROFILE:
         patch.automationProfileId = targetId;
         break;
@@ -148,6 +168,15 @@ export class BulkOperationsService {
         break;
       case BulkOperation.ASSIGN_KNOWLEDGE_PROFILE:
         patch.knowledgeProfileId = targetId;
+        break;
+      case BulkOperation.CLEAR_KNOWLEDGE_PROFILE:
+        patch.knowledgeProfileId = null;
+        break;
+      case BulkOperation.ENABLE_KNOWLEDGE_COLLECTION:
+        patch.knowledgeContributionEnabled = true;
+        break;
+      case BulkOperation.DISABLE_KNOWLEDGE_COLLECTION:
+        patch.knowledgeContributionEnabled = false;
         break;
       default:
         throw new Error(`Unknown bulk operation ${operation}`);

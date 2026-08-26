@@ -5,10 +5,18 @@ import type { Response } from 'express';
 import { RequirePermissions } from '../rbac/permissions.guard';
 import { toCsv } from './csv';
 import { defaultWindow, ReportsService, type DateWindow } from './reports.service';
+import { OperationsAnalyticsService } from './operations-analytics.service';
+import { Type } from 'class-transformer';
+import { IsInt, Max, Min } from 'class-validator';
 
 export class WindowDto {
   @IsOptional() @IsISO8601() from?: string;
   @IsOptional() @IsISO8601() to?: string;
+}
+
+export class DaysDto {
+  /** Bounded: an unbounded window would let one request scan the entire message history. */
+  @IsOptional() @Type(() => Number) @IsInt() @Min(1) @Max(365) days?: number;
 }
 
 const EXPORTABLE = ['conversations', 'decisions', 'escalations'] as const;
@@ -24,13 +32,43 @@ type Exportable = (typeof EXPORTABLE)[number];
 @ApiTags('reports')
 @Controller({ path: 'reports', version: '1' })
 export class ReportsController {
-  constructor(private readonly reports: ReportsService) {}
+  constructor(
+    private readonly reports: ReportsService,
+    private readonly operations: OperationsAnalyticsService,
+  ) {}
 
   @Get('dashboard')
   @RequirePermissions('reports.view')
   @ApiOperation({ summary: 'Everything the dashboard shows, for one window' })
   async dashboard(@Query() query: WindowDto) {
     return this.reports.dashboard(windowFrom(query));
+  }
+
+  /**
+   * The operations dashboard: group coverage, and AI against human support.
+   *
+   * One call rather than a request per card — the page renders as a unit, and a card-per-endpoint
+   * dashboard makes a dozen round trips to show one screen.
+   */
+  @Get('operations')
+  @RequirePermissions('reports.view')
+  @ApiOperation({ summary: 'Group coverage plus AI and human support activity' })
+  async operationsDashboard(@Query() query: DaysDto) {
+    return this.operations.dashboard(query.days ?? 14);
+  }
+
+  @Get('ai-vs-human')
+  @RequirePermissions('reports.view')
+  @ApiOperation({ summary: 'AI and human support per day — replies and unique groups, counted separately' })
+  async aiVsHuman(@Query() query: DaysDto) {
+    return { items: await this.operations.aiVsHumanDaily(query.days ?? 30) };
+  }
+
+  @Get('group-coverage')
+  @RequirePermissions('reports.view')
+  @ApiOperation({ summary: 'How many groups each capability is configured for' })
+  async groupCoverage() {
+    return this.operations.coverage();
   }
 
   @Get('activity-trend')

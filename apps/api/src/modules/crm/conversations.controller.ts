@@ -26,6 +26,7 @@ import {
 } from './conversation-states';
 import { CustomerService } from './customer.service';
 import { TaggableEntity } from './entities/customer-metadata.entity';
+import { QueryBoolean } from '../../common/http/query-boolean';
 
 export class ListConversationsDto {
   @IsOptional() @IsEnum(ConversationStatus) status?: ConversationStatus;
@@ -35,8 +36,8 @@ export class ListConversationsDto {
   @IsOptional() @IsUUID() assignedToUserId?: string;
   @IsOptional() @IsUUID() assignedToTeamId?: string;
   @IsOptional() @IsUUID() channelAccountId?: string;
-  @IsOptional() @Type(() => Boolean) @IsBoolean() unassignedOnly?: boolean;
-  @IsOptional() @Type(() => Boolean) @IsBoolean() pinnedOnly?: boolean;
+  @IsOptional() @QueryBoolean() @IsBoolean() unassignedOnly?: boolean;
+  @IsOptional() @QueryBoolean() @IsBoolean() pinnedOnly?: boolean;
   @IsOptional() @IsString() @MaxLength(120) search?: string;
   @IsOptional() @Type(() => Number) @IsInt() @Min(1) @Max(100) limit?: number;
   @IsOptional() @Type(() => Number) @IsInt() @Min(0) offset?: number;

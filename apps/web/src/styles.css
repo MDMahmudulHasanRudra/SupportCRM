@@ -830,6 +830,27 @@ button.danger:hover:not(:disabled) { filter: brightness(1.1); }
   background: color-mix(in srgb, var(--ok) 10%, var(--surface));
 }
 
+/* --- group operations ---------------------------------------------------------------------------- */
+
+/* The bulk toolbar only exists while something is selected, so it is allowed to be loud: it is the
+   thing standing between a click and a change across a few thousand groups. */
+.bulk-bar {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-wrap: wrap;
+  margin-top: 14px;
+  padding: 10px 14px;
+  border-radius: var(--radius);
+  border: 1px solid color-mix(in srgb, var(--accent) 40%, var(--border));
+  background: var(--accent-soft);
+}
+.bulk-bar .spacer { flex: 1; }
+
+th.sortable { cursor: pointer; user-select: none; white-space: nowrap; }
+th.sortable:hover { color: var(--text); }
+.sort-arrow { margin-left: 4px; color: var(--accent); }
+
 /* --- settings hub ------------------------------------------------------------------------------ */
 
 .settings-links {
@@ -1085,3 +1106,109 @@ button.danger:hover:not(:disabled) { filter: brightness(1.1); }
   text-decoration: none;
 }
 .button-link:hover { background: var(--accent-hover); border-color: var(--accent-hover); }
+
+/* Page-level tabs. Distinct from `.inbox-tab`, which is sized for the narrow conversation sidebar
+   and stretches its items to fill the column; these sit under a page heading and size to content. */
+.page-tabs { display: flex; gap: 4px; border-bottom: 1px solid var(--border); padding-bottom: 8px; flex-wrap: wrap; }
+.page-tab {
+  padding: 6px 12px;
+  font-size: 13px;
+  font-weight: 600;
+  border-radius: var(--radius-sm);
+  background: none;
+  border-color: transparent;
+  color: var(--text-muted);
+  text-decoration: none;
+}
+.page-tab:hover { background: var(--surface-2); color: var(--text); }
+.page-tab.active { background: var(--accent-soft); color: var(--accent); border-color: transparent; }
+
+/* Key/value detail. A real <dl>, laid out in two columns so the values line up. */
+.detail-list { display: grid; grid-template-columns: minmax(120px, max-content) 1fr; gap: 8px 18px; margin: 0; }
+.detail-list dt { margin: 0; }
+.detail-list dd { margin: 0; overflow-wrap: anywhere; }
+
+/* A switch with its explanation beside it. The description carries the real weight here — these
+   toggles change what the product is allowed to do in a group, so each one says so in words. */
+.toggle-row { display: flex; align-items: flex-start; gap: 10px; padding: 9px 0; cursor: pointer; }
+.toggle-row + .toggle-row { border-top: 1px solid var(--border); }
+.toggle-row input { margin-top: 3px; flex: none; }
+.toggle-row:has(input:disabled) { cursor: default; opacity: 0.65; }
+
+.stack-tight { display: flex; flex-direction: column; gap: 2px; }
+.nowrap { white-space: nowrap; }
+td.wrap { overflow-wrap: anywhere; white-space: normal; }
+
+/* Numeric table cells. Right-aligned and tabular so digits line up column-wise — comparing counts
+   down a column is the whole reason these tables exist. */
+th.num, td.num { text-align: right; font-variant-numeric: tabular-nums; }
+
+/* A single-line form: inputs sized to content, with the submit button aligned to their baseline. */
+.form-row { align-items: flex-end; gap: 12px; flex-wrap: wrap; }
+.form-row .field { flex: 1 1 160px; min-width: 140px; }
+
+/* The AI permission chain. A numbered list because the order is the meaning — each layer is applied
+   in turn and any one of them can withhold permission. */
+.chain { list-style: none; margin: 12px 0 0; padding: 0; display: flex; flex-direction: column; gap: 2px; }
+.chain-step {
+  display: flex;
+  align-items: flex-start;
+  gap: 12px;
+  padding: 10px 12px;
+  border-left: 2px solid var(--border);
+  background: var(--surface-2);
+}
+.chain-step + .chain-step { margin-top: 2px; }
+/* A blocking layer is the answer to the operator's question, so it is marked on the row itself
+   rather than only in its badge. */
+.chain-step.blocking { border-left-color: var(--bad); background: color-mix(in srgb, var(--bad) 7%, var(--surface-2)); }
+
+/* A section heading inside a page that already has an h1. */
+.section-title { font-size: 15px; font-weight: 650; margin: 0; }
+
+/* Two columns that collapse to one on narrow screens. */
+.grid-2 { display: grid; grid-template-columns: repeat(auto-fit, minmax(320px, 1fr)); gap: 14px; }
+
+/* AI against human. Side by side because the comparison is the point. */
+.versus { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; margin-bottom: 14px; }
+.versus-side { padding: 12px 14px; border-radius: var(--radius-sm); background: var(--surface-2); border-left: 3px solid var(--border); }
+.versus-accent { border-left-color: var(--accent); }
+.versus-ok { border-left-color: var(--ok); }
+.versus-value { font-size: 24px; font-weight: 650; font-variant-numeric: tabular-nums; line-height: 1.2; }
+
+/* Proportion bars. The count and total sit beside the percentage — a bare percentage hides its
+   denominator, and 64% of 9 groups reads very differently from 64% of 3,000. */
+.coverage { margin-top: 12px; }
+.coverage-head { display: flex; justify-content: space-between; align-items: baseline; gap: 12px; margin-bottom: 5px; font-size: 13px; }
+.coverage-track { height: 7px; border-radius: 4px; background: var(--surface-2); overflow: hidden; }
+.coverage-fill { height: 100%; background: var(--accent); border-radius: 4px; transition: width 180ms ease; }
+
+/* Day-by-day support activity. A list rather than a table because each day expands to name the
+   groups, and a table row that grows a nested table is harder to read than an indented list. */
+.day-list { list-style: none; margin: 12px 0 0; padding: 0; }
+.day-entry + .day-entry { border-top: 1px solid var(--border); }
+.day-head {
+  display: flex;
+  align-items: baseline;
+  gap: 14px;
+  width: 100%;
+  padding: 11px 4px;
+  background: none;
+  border: none;
+  text-align: left;
+  cursor: pointer;
+  color: inherit;
+}
+.day-head:hover { background: var(--surface-2); }
+.day-date { min-width: 170px; font-weight: 600; font-size: 13px; }
+.day-figures { flex: 1; font-size: 13px; font-variant-numeric: tabular-nums; }
+.day-groups { list-style: none; margin: 0 0 10px; padding: 0 4px 0 174px; display: flex; flex-direction: column; gap: 6px; }
+.day-groups li { display: flex; justify-content: space-between; gap: 14px; align-items: baseline; }
+.day-group-name { overflow-wrap: anywhere; }
+
+/* The indent only makes sense while the date column has room for it. */
+@media (max-width: 720px) {
+  .day-head { flex-wrap: wrap; gap: 6px; }
+  .day-date { min-width: 0; }
+  .day-groups { padding-left: 4px; }
+}

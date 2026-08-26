@@ -283,6 +283,305 @@ export const groups = {
       `/groups/${groupId}/sync-participants`,
       { channelAccountId },
     ),
+
+  /** One group with every flag the detail screen shows, plus its live participant count. */
+  detail: (id: string) => api.get<GroupDetail>(`/groups/${id}`),
+
+  /**
+   * Why AI can or cannot reply in this group.
+   *
+   * Diagnosis, not permission. The backend composes the real gate per message; this reports the
+   * same composition so the console can name the switch instead of showing a dead toggle.
+   */
+  aiStatus: (id: string) => api.get<GroupAiStatus>(`/groups/${id}/ai-status`),
+
+  /**
+   * Changes one group's flags.
+   *
+   * Send only what is changing — the endpoint patches, and omitting a field leaves it alone. That
+   * matters because two operators on the same group would otherwise overwrite each other's toggles
+   * by replaying stale values they happened to have on screen.
+   */
+  updateConfig: (
+    id: string,
+    patch: Partial<{
+      monitoringState: GroupMonitoringStateValue;
+      aiEnabled: boolean;
+      automationEnabled: boolean;
+      patternAnalysisEnabled: boolean;
+      knowledgeContributionEnabled: boolean;
+    }>,
+  ) => api.patch<GroupDetail>(`/groups/${id}/config`, patch),
+};
+
+export type AiBlocker =
+  | 'EMERGENCY_STOP'
+  | 'AI_DISABLED_GROUP'
+  | 'AI_DISABLED_PROFILE'
+  | 'MONITORING_DISABLED'
+  | 'AUTOMATION_DISABLED'
+  | 'SESSION_NOT_READY';
+
+export interface GroupAiStatus {
+  groupId: string;
+  /** What the answer covers — `canReply` is not a per-conversation guarantee. */
+  scope: string;
+  monitoring: { state: string; collecting: boolean };
+  group: { aiEnabled: boolean; automationEnabled: boolean; patternAnalysisEnabled: boolean };
+  profile: { id: string; name: string; aiEnabled: boolean; automationEnabled: boolean } | null;
+  system: { aiPaused: boolean; automationPaused: boolean };
+  session: { status: string; ready: boolean };
+  knowledge: { profileId: string | null };
+  canReply: boolean;
+  blockedBy: AiBlocker[];
+  primaryBlocker: AiBlocker | null;
+  explanation: string;
+}
+
+export type GroupMonitoringStateValue = 'UNMONITORED' | 'MONITORED' | 'IGNORED' | 'PENDING';
+
+export interface GroupDetail {
+  id: string;
+  channelKey: string;
+  channelAccountId: string;
+  externalId: string;
+  name: string;
+  description: string | null;
+  participantCount: number | null;
+  activeParticipants: number;
+  isActive: boolean;
+  isAnnounceOnly: boolean;
+  monitoringState: GroupMonitoringStateValue;
+  aiEnabled: boolean;
+  automationEnabled: boolean;
+  patternAnalysisEnabled: boolean;
+  knowledgeContributionEnabled: boolean;
+  knowledgeProfileId: string | null;
+  lastSyncedAt: string | null;
+  participantsSyncedAt: string | null;
+  lastMessageAt: string | null;
+}
+
+export type MessageClassificationValue =
+  | 'CUSTOMER_MESSAGE'
+  | 'TEAM_MESSAGE'
+  | 'BOT_MESSAGE'
+  | 'SYSTEM_EVENT'
+  | 'UNKNOWN';
+
+export interface InspectedMessage {
+  id: string;
+  channelAccountId: string;
+  externalId: string | null;
+  externalConversationId: string;
+  groupId: string | null;
+  direction: MessageDirectionValue;
+  senderPhone: string | null;
+  senderDisplayName: string | null;
+  contentType: string;
+  bodyPreview: string | null;
+  classification: MessageClassificationValue;
+  fromAccount: boolean;
+  sentAt: string;
+  processingStatus: string | null;
+  deliveryStatus: string | null;
+}
+
+// === operations analytics (Phase 2) ===============================================================
+
+export interface CoverageSummary {
+  totalGroups: number;
+  monitored: number;
+  /**
+   * Groups whose own AI switch is on.
+   *
+   * Deliberately *not* "AI will reply here" — a profile, the monitoring state, an emergency stop or
+   * a disconnected session can each still withhold it. The per-group screen has the effective answer.
+   */
+  aiConfigured: number;
+  aiDisabled: number;
+  automationConfigured: number;
+  patternAnalysis: number;
+}
+
+/** Replies are messages sent; groups are the distinct groups reached. Never interchangeable. */
+export interface SupportTotals {
+  replies: number;
+  groups: number;
+}
+
+export interface AiVsHumanDay {
+  day: string;
+  aiReplies: number;
+  aiGroups: number;
+  humanReplies: number;
+  humanGroups: number;
+}
+
+export interface ActiveGroupRow {
+  groupId: string;
+  name: string | null;
+  messages: number;
+  aiReplies: number;
+  humanSupport: number;
+  lastMessageAt: string | null;
+}
+
+export interface OperationsDashboard {
+  coverage: CoverageSummary;
+  today: { ai: SupportTotals; human: SupportTotals };
+  window: { days: number; ai: SupportTotals; human: SupportTotals };
+  daily: AiVsHumanDay[];
+  topGroups: ActiveGroupRow[];
+}
+
+export const operationsReports = {
+  /** Everything the operations section of the dashboard needs, in one request. */
+  dashboard: (days = 14) => api.get<OperationsDashboard>(`/reports/operations?days=${days}`),
+  aiVsHuman: (days = 30) => api.get<{ items: AiVsHumanDay[] }>(`/reports/ai-vs-human?days=${days}`),
+  coverage: () => api.get<CoverageSummary>('/reports/group-coverage'),
+};
+
+// === support members (Phase 2) ====================================================================
+
+/**
+ * Support members are `team_member_identities` rows.
+ *
+ * The console calls them support members; the database calls them team member identities, and they
+ * are the same records that decide whether an inbound message is classified `TEAM_MESSAGE`. There
+ * is deliberately no second entity — two lists of the same people would eventually disagree about
+ * who is on the team, and the classifier would keep following the other one.
+ */
+export interface TeamIdentity {
+  id: string;
+  channelKey: string;
+  externalId: string;
+  phone: string;
+  displayName: string;
+  jobRole: string | null;
+  userId: string | null;
+  isActive: boolean;
+  createdAt: string;
+}
+
+export interface SupportMemberRow {
+  id: string;
+  displayName: string;
+  phone: string;
+  jobRole: string | null;
+  isActive: boolean;
+  channelKey: string;
+  /** Replies sent. A count of messages. */
+  repliesToday: number;
+  replies7d: number;
+  replies30d: number;
+  /** Distinct groups replied in. Never the same figure as replies, and never shown as if it were. */
+  groupsToday: number;
+  groups7d: number;
+  groups30d: number;
+  lastReplyAt: string | null;
+}
+
+export interface SupportDay {
+  day: string;
+  replies: number;
+  groups: number;
+}
+
+export interface SupportTeamDay extends SupportDay {
+  activeMembers: number;
+}
+
+export interface SupportGroupBreakdown {
+  groupId: string | null;
+  groupName: string;
+  replies: number;
+  lastReplyAt: string | null;
+}
+
+export interface SupportDayDetail {
+  day: string;
+  totalMessages: number;
+  /** Distinct groups helped that day — never the message count. */
+  groupCount: number;
+  groups: Array<{
+    groupId: string | null;
+    groupName: string;
+    messages: number;
+    firstAt: string | null;
+    lastAt: string | null;
+  }>;
+}
+
+export interface SupportDayMember {
+  identityId: string;
+  displayName: string;
+  replies: number;
+  groups: string[];
+}
+
+export const team = {
+  identities: (includeInactive = false) =>
+    api.get<{ items: TeamIdentity[]; total: number }>(
+      `/team/identities${includeInactive ? '?includeInactive=true' : ''}`,
+    ),
+
+  /**
+   * Registers a colleague's WhatsApp number as a support member.
+   *
+   * This changes how future messages are classified. It is not retroactive — messages already
+   * stored keep the classification they were given when they arrived, so registering somebody today
+   * does not rewrite yesterday's history or yesterday's figures.
+   */
+  register: (input: { channelKey: string; phone: string; displayName: string; jobRole?: string }) =>
+    api.post<TeamIdentity>('/team/identities', input),
+
+  update: (id: string, patch: Partial<{ displayName: string; jobRole: string; isActive: boolean }>) =>
+    api.patch<TeamIdentity>(`/team/identities/${id}`, patch),
+
+  deactivate: (id: string) => api.post<TeamIdentity>(`/team/identities/${id}/deactivate`, {}),
+};
+
+export const support = {
+  members: (includeInactive = false) =>
+    api.get<{ items: SupportMemberRow[] }>(
+      `/support/members${includeInactive ? '?includeInactive=true' : ''}`,
+    ),
+
+  memberDaily: (id: string, days = 30) =>
+    api.get<{ items: SupportDay[] }>(`/support/members/${id}/daily?days=${days}`),
+
+  memberGroups: (id: string, days = 30) =>
+    api.get<{ items: SupportGroupBreakdown[] }>(`/support/members/${id}/groups?days=${days}`),
+
+  activity: (days = 30) => api.get<{ items: SupportTeamDay[] }>(`/support/activity?days=${days}`),
+
+  /** Who replied on one calendar day, and in which groups by name. */
+  activityDay: (day: string) => api.get<{ items: SupportDayMember[] }>(`/support/activity/${day}`),
+
+  /**
+   * One member day by day, with the groups named.
+   *
+   * Answers "which executive supported how many groups on which day". Dates are `YYYY-MM-DD` in the
+   * server's configured timezone, which is the same day the aggregates bucket on.
+   */
+  memberActivity: (id: string, range: { from?: string; to?: string } = {}) => {
+    const query = new URLSearchParams();
+    if (range.from) query.set('from', range.from);
+    if (range.to) query.set('to', range.to);
+    return api.get<{ items: SupportDayDetail[]; from: string; to: string }>(
+      `/support/members/${id}/activity?${query.toString()}`,
+    );
+  },
+};
+
+export const knowledgeHarvest = {
+  /** Proposes knowledge candidates from groups that opted in. Creates candidates, never articles. */
+  fromGroups: (input: { sinceDays?: number; limit?: number } = {}) =>
+    api.post<{ groupsConsidered: number; questionsFound: number; created: number; updated: number }>(
+      '/knowledge/candidates/harvest-groups',
+      input,
+    ),
 };
 
 // === knowledge (Phase 4) ==========================================================================
@@ -382,7 +681,18 @@ export interface KnowledgeStatusReport {
   embedding: { available: boolean; provider: string; model: string | null; dimensions: number };
 }
 
+export interface KnowledgeProfile {
+  id: string;
+  name: string;
+  description: string | null;
+  categoryIds: string[];
+  isActive: boolean;
+}
+
 export const knowledge = {
+  /** The profiles a group can be pointed at, for the operations filter and the bulk assign. */
+  profiles: () => api.get<{ items: KnowledgeProfile[] }>('/knowledge/profiles'),
+
   status: () => api.get<KnowledgeStatusReport>('/knowledge/status'),
 
   categories: () => api.get<{ items: KnowledgeCategory[] }>('/knowledge/categories'),
@@ -788,6 +1098,8 @@ export const escalations = {
 };
 
 export type BulkOperation =
+  | 'ENABLE_PATTERN_ANALYSIS'
+  | 'DISABLE_PATTERN_ANALYSIS'
   | 'ENABLE_AUTOMATION'
   | 'DISABLE_AUTOMATION'
   | 'ENABLE_AI'
@@ -795,7 +1107,11 @@ export type BulkOperation =
   | 'ENABLE_MONITORING'
   | 'DISABLE_MONITORING'
   | 'ASSIGN_AUTOMATION_PROFILE'
-  | 'CLEAR_AUTOMATION_PROFILE';
+  | 'CLEAR_AUTOMATION_PROFILE'
+  | 'ASSIGN_KNOWLEDGE_PROFILE'
+  | 'CLEAR_KNOWLEDGE_PROFILE'
+  | 'ENABLE_KNOWLEDGE_COLLECTION'
+  | 'DISABLE_KNOWLEDGE_COLLECTION';
 
 export interface BulkRequest {
   operation: BulkOperation;
@@ -803,6 +1119,106 @@ export interface BulkRequest {
   filter?: { channelAccountId?: string; monitoringState?: string };
   targetId?: string;
 }
+
+export interface GroupOperationsRow {
+  id: string;
+  externalId: string;
+  channelAccountId: string;
+  name: string | null;
+  participantCount: number | null;
+  isActive: boolean;
+  monitoringState: string;
+  aiEnabled: boolean;
+  automationEnabled: boolean;
+  patternAnalysisEnabled: boolean;
+  knowledgeContributionEnabled: boolean;
+  knowledgeProfileId: string | null;
+  lastMessageAt: string | null;
+  /**
+   * Activity since midnight.
+   *
+   * Today rather than all time: an all-time per-group count has to touch every message the group
+   * has ever received, and Postgres computes it for every matching group before applying LIMIT.
+   * All-time figures live on the group detail screen, where the scope is one group.
+   */
+  messagesToday: number;
+  aiRepliesToday: number;
+  humanSupportToday: number;
+}
+
+export interface GroupOperationsSummary {
+  total: number;
+  aiMonitored: number;
+  aiDisabled: number;
+  collecting: number;
+  patternAnalysis: number;
+  activeToday: number;
+  aiSupportedToday: number;
+  humanSupportedToday: number;
+}
+
+/** Every filter here is applied in SQL. Nothing is narrowed in the browser. */
+export interface GroupOperationsFilter {
+  channelAccountId?: string;
+  monitoringState?: string;
+  aiEnabled?: boolean;
+  automationEnabled?: boolean;
+  patternAnalysisEnabled?: boolean;
+  knowledgeContributionEnabled?: boolean;
+  isActive?: boolean;
+  /** Groups that received a message since midnight. */
+  activeToday?: boolean;
+  /** A knowledge profile id, or the literal `none` for groups without one. */
+  knowledgeProfileId?: string;
+  search?: string;
+}
+
+function groupFilterQuery(filter: GroupOperationsFilter): URLSearchParams {
+  const query = new URLSearchParams();
+  if (filter.channelAccountId) query.set('channelAccountId', filter.channelAccountId);
+  if (filter.monitoringState) query.set('monitoringState', filter.monitoringState);
+  if (filter.aiEnabled !== undefined) query.set('aiEnabled', String(filter.aiEnabled));
+  if (filter.automationEnabled !== undefined) query.set('automationEnabled', String(filter.automationEnabled));
+  if (filter.patternAnalysisEnabled !== undefined) {
+    query.set('patternAnalysisEnabled', String(filter.patternAnalysisEnabled));
+  }
+  if (filter.isActive !== undefined) query.set('isActive', String(filter.isActive));
+  if (filter.activeToday !== undefined) query.set('activeToday', String(filter.activeToday));
+  if (filter.knowledgeContributionEnabled !== undefined) {
+    query.set('knowledgeContributionEnabled', String(filter.knowledgeContributionEnabled));
+  }
+  if (filter.knowledgeProfileId) query.set('knowledgeProfileId', filter.knowledgeProfileId);
+  if (filter.search) query.set('search', filter.search);
+  return query;
+}
+
+export const groupOperations = {
+  list: (
+    filter: GroupOperationsFilter,
+    page: { limit: number; offset: number; sort: string; direction: 'ASC' | 'DESC' },
+  ) => {
+    const query = groupFilterQuery(filter);
+    query.set('limit', String(page.limit));
+    query.set('offset', String(page.offset));
+    query.set('sort', page.sort);
+    query.set('direction', page.direction);
+    return api.get<{ items: GroupOperationsRow[]; total: number; limit: number; offset: number }>(
+      `/groups/operations/list?${query.toString()}`,
+    );
+  },
+
+  summary: (since?: string) =>
+    api.get<GroupOperationsSummary>(`/groups/operations/summary${since ? `?since=${encodeURIComponent(since)}` : ''}`),
+
+  /**
+   * Every id a filter matches, for "select all matching".
+   *
+   * Resolved on the server so a selection spanning sixty pages never depends on what the browser
+   * happens to have loaded.
+   */
+  matchingIds: (filter: GroupOperationsFilter) =>
+    api.get<{ ids: string[]; total: number }>(`/groups/operations/matching-ids?${groupFilterQuery(filter).toString()}`),
+};
 
 export const bulk = {
   preview: (input: BulkRequest) =>
@@ -1427,6 +1843,37 @@ export const conversations = {
 };
 
 export const messages = {
+  /**
+   * Reads persisted messages. Inspection only — this cannot cause a send.
+   *
+   * Filtering happens in Postgres against indexed columns, so a group with a long history costs the
+   * same as a quiet one. `classification` is what separates "what the AI answered" from "what a
+   * person answered" without a second endpoint for each.
+   */
+  list: (
+    params: {
+      groupId?: string;
+      channelAccountId?: string;
+      classification?: MessageClassificationValue;
+      direction?: MessageDirectionValue;
+      search?: string;
+      limit?: number;
+      offset?: number;
+    } = {},
+  ) => {
+    const query = new URLSearchParams();
+    if (params.groupId) query.set('groupId', params.groupId);
+    if (params.channelAccountId) query.set('channelAccountId', params.channelAccountId);
+    if (params.classification) query.set('classification', params.classification);
+    if (params.direction) query.set('direction', params.direction);
+    if (params.search) query.set('search', params.search);
+    query.set('limit', String(params.limit ?? 50));
+    query.set('offset', String(params.offset ?? 0));
+    return api.get<{ items: InspectedMessage[]; total: number; limit: number; offset: number }>(
+      `/messages?${query.toString()}`,
+    );
+  },
+
   send: (input: {
     channelAccountId: string;
     externalConversationId: string;

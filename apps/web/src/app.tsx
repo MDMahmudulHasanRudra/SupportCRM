@@ -24,6 +24,7 @@ import {
   IconSparkles,
   IconSun,
   IconUserCircle,
+  IconUsers,
   IconZap,
 } from './components/icons';
 import { AIProvidersPage } from './pages/ai/providers';
@@ -43,6 +44,11 @@ import { EmergencyPage } from './pages/emergency';
 import { EscalationConfigPage } from './pages/escalation-config';
 import { EscalationsPage } from './pages/escalations';
 import { GroupsPage } from './pages/groups';
+import { GroupOperationsPage } from './pages/groups/operations';
+import { GroupDetailPage } from './pages/groups/detail';
+import { SupportMembersPage } from './pages/support/members';
+import { SupportMemberDetailPage } from './pages/support/member-detail';
+import { SupportActivityPage } from './pages/support/activity';
 import { OnboardingRulesPage } from './pages/groups/onboarding';
 import { KnowledgeBrowserPage } from './pages/knowledge/browser';
 import { KnowledgeCandidatesPage } from './pages/knowledge/candidates';
@@ -110,7 +116,15 @@ export function App() {
               <Route path="/channels/whatsapp" element={<WhatsAppAccountsPage />} />
               <Route path="/channels/whatsapp/:accountId" element={<WhatsAppAccountPage />} />
               <Route path="/channels/whatsapp/:accountId/groups" element={<GroupsPage />} />
+              <Route path="/groups" element={<GroupOperationsPage />} />
               <Route path="/groups/onboarding" element={<OnboardingRulesPage />} />
+              {/* Last: `onboarding` would otherwise be captured as a group id. */}
+              <Route path="/groups/:id" element={<GroupDetailPage />} />
+
+              {/* Support members: the team_member_identities rows, reported on. */}
+              <Route path="/support-members" element={<SupportMembersPage />} />
+              <Route path="/support-members/:id" element={<SupportMemberDetailPage />} />
+              <Route path="/support-activity" element={<SupportActivityPage />} />
 
               {/* Knowledge */}
               <Route path="/knowledge" element={<KnowledgeBrowserPage />} />
@@ -179,7 +193,10 @@ function Sidebar() {
 
       <div className="nav-group">Channels</div>
       {can('channels.read') && item('/channels/whatsapp', 'WhatsApp', <IconMessageCircle size={17} />)}
-      {can('groups.read') && item('/groups/onboarding', 'Group onboarding', <IconRadio size={17} />)}
+      {can('groups.read') && item('/groups', 'Groups', <IconRadio size={17} />, true)}
+      {can('groups.read') && item('/groups/onboarding', 'Group onboarding', <IconUsers size={17} />)}
+      {can('team.manage') && item('/support-members', 'Support members', <IconUsers size={17} />, true)}
+      {can('team.manage') && item('/support-activity', 'Support activity', <IconRadio size={17} />)}
 
       <div className="nav-group">Knowledge &amp; AI</div>
       {can('knowledge.read') && item('/knowledge', 'Knowledge', <IconBookOpen size={17} />)}

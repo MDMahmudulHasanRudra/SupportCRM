@@ -65,11 +65,16 @@ export class CandidateDetectorService {
         (array_agg(m.id::text ORDER BY m."sentAt" DESC))[1:5]     AS message_ids
       FROM messages m
       JOIN decision_logs d ON d."messageId" = m.id
+      -- Groups can opt out of pattern analysis. A direct chat has no group row and is always
+      -- included; only a group that has explicitly been switched off is skipped, so the default
+      -- behaviour is unchanged.
+      LEFT JOIN groups g ON g.id = m."groupId"
       WHERE m.direction = 'INBOUND'
         AND m."sentAt" >= $1
         AND m.body IS NOT NULL
         AND length(trim(m.body)) >= $2
         AND d.outcome IN ('HUMAN_HANDOFF', 'NO_RESPONSE')
+        AND (m."groupId" IS NULL OR g."patternAnalysisEnabled" = true)
       GROUP BY normalised
       HAVING COUNT(*) >= $3
       ORDER BY COUNT(*) DESC

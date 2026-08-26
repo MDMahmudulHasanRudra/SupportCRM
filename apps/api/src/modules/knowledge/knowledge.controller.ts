@@ -17,17 +17,7 @@ import { FileInterceptor } from '@nestjs/platform-express';
 import { InjectRepository } from '@nestjs/typeorm';
 import { ApiOperation, ApiTags } from '@nestjs/swagger';
 import { Type } from 'class-transformer';
-import {
-  IsArray,
-  IsEnum,
-  IsInt,
-  IsOptional,
-  IsString,
-  IsUUID,
-  MaxLength,
-  Min,
-  MinLength,
-} from 'class-validator';
+import { IsArray, IsEnum, IsInt, IsOptional, IsString, IsUUID, Max, MaxLength, Min, MinLength } from 'class-validator';
 import type { Request, Response } from 'express';
 import { Repository } from 'typeorm';
 import { AuditService } from '../audit/audit.service';
@@ -41,6 +31,7 @@ import { KnowledgeDocument } from './entities/knowledge-document.entity';
 import { KnowledgeProfile } from './entities/knowledge-profile.entity';
 import { KnowledgeArticleService } from './knowledge-article.service';
 import { KnowledgeCandidateService } from './knowledge-candidate.service';
+import { GroupKnowledgeHarvestService } from './group-knowledge-harvest.service';
 import { KnowledgeDocumentService } from './knowledge-document.service';
 import { KnowledgeIndexService } from './knowledge-index.service';
 import { KnowledgeRetrievalService } from './knowledge-retrieval.service';
@@ -158,6 +149,13 @@ export class DismissCandidateDto {
  * Channel agnostic throughout: group and customer ids are opaque UUIDs, and nothing here imports a
  * channel, an adapter or a gateway type.
  */
+export class HarvestGroupsDto {
+  /** How far back to look. Bounded so one call cannot scan the whole message history. */
+  @IsOptional() @Type(() => Number) @IsInt() @Min(1) @Max(365) sinceDays?: number;
+  /** A ceiling per run, so one sweep cannot flood the review queue. */
+  @IsOptional() @Type(() => Number) @IsInt() @Min(1) @Max(100) limit?: number;
+}
+
 @ApiTags('knowledge')
 @Controller({ path: 'knowledge', version: '1' })
 export class KnowledgeController {
@@ -171,6 +169,7 @@ export class KnowledgeController {
     private readonly articles: KnowledgeArticleService,
     private readonly documents: KnowledgeDocumentService,
     private readonly candidates: KnowledgeCandidateService,
+    private readonly harvester: GroupKnowledgeHarvestService,
     private readonly retrieval: KnowledgeRetrievalService,
     private readonly index: KnowledgeIndexService,
     private readonly realtime: RealtimeGateway,
@@ -668,6 +667,34 @@ export class KnowledgeController {
   @ApiOperation({ summary: 'Record a knowledge gap (manual only in this phase)' })
   async createCandidate(@Body() dto: CreateCandidateDto, @CurrentUser() user: AuthenticatedUser) {
     return this.candidates.create(dto, user.id);
+  }
+
+  /**
+   * Harvests knowledge candidates from groups that opted in.
+   *
+   * Creates candidates only — questions a person still has to answer and convert. Groups that have
+   * not enabled knowledge contribution are excluded in SQL, so this cannot reach them.
+   */
+  @Post('candidates/harvest-groups')
+  @RequirePermissions('knowledge.approve')
+  @ApiOperation({ summary: 'Propose knowledge candidates from opted-in groups' })
+  async harvestGroups(
+    @Body() dto: HarvestGroupsDto,
+    @CurrentUser() user: AuthenticatedUser,
+    @Req() request: Request,
+  ) {
+    const result = await this.harvester.harvest({ sinceDays: dto.sinceDays, limit: dto.limit });
+
+    await this.audit.record(
+      {
+        action: 'knowledge.candidates_harvested',
+        resource: 'knowledge_candidate',
+        after: { ...result, sinceDays: dto.sinceDays ?? 30 },
+      },
+      this.audit.actorFromRequest(request, user),
+    );
+
+    return result;
   }
 
   @Post('candidates/:id/convert')

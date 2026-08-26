@@ -36,6 +36,7 @@ import {
   errorMessage,
   humanise,
 } from '../components/ui';
+import { DashboardOperations } from './dashboard-operations';
 
 /**
  * The landing page.
@@ -121,6 +122,10 @@ export function DashboardPage() {
           {report.health.failedJobs} background job{report.health.failedJobs === 1 ? '' : 's'} failed.
         </div>
       )}
+
+      {/* Group operations. Added alongside the conversation-oriented reporting below rather than
+          replacing it — the two answer different questions and operators use both. */}
+      {canSeeReports && <DashboardOperations />}
 
       {canSeeReports && (
         <>

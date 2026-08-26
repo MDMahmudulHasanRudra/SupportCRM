@@ -13,6 +13,7 @@ import { Conversation } from '../crm/entities/conversation.entity';
 import { Group } from '../groups/entities/group.entity';
 import { Message } from '../messaging/entities/message.entity';
 import { MidConfidencePolicy, type ConfidenceThresholds } from './decision-policy';
+import { composePermission, type PermissionChain } from './permission-chain';
 
 /**
  * Everything the engine is allowed to know about one message.
@@ -35,6 +36,14 @@ export interface DecisionContext {
   /** Effective switches after profile and per-entity overrides. */
   automationEnabled: boolean;
   aiEnabled: boolean;
+  /**
+   * The same two switches, with the layers that produced them.
+   *
+   * `aiChain.effective === aiEnabled` by construction — the boolean is read off the chain rather
+   * than computed beside it, so the console's explanation can never contradict the engine's gate.
+   */
+  automationChain: PermissionChain;
+  aiChain: PermissionChain;
   customerTags: string[];
   now: Date;
 }
@@ -80,13 +89,22 @@ export class DecisionContextBuilder {
      * switched off must not have it switched back on by a profile. The switches are permissions to
      * act, and every level can withhold one.
      */
-    const automationEnabled =
-      conversation.automationEnabled &&
-      (group ? group.automationEnabled : true) &&
-      (profile ? profile.automationEnabled : true);
+    const automationChain = composePermission({
+      conversation: conversation.automationEnabled,
+      // `null`, not `true`: a direct chat has no group, and absence is not consent-by-default —
+      // it is simply a layer that does not apply here.
+      group: group ? group.automationEnabled : null,
+      profile: profile ? profile.automationEnabled : null,
+    });
 
-    const aiEnabled =
-      conversation.aiEnabled && (group ? group.aiEnabled : true) && (profile ? profile.aiEnabled : true);
+    const aiChain = composePermission({
+      conversation: conversation.aiEnabled,
+      group: group ? group.aiEnabled : null,
+      profile: profile ? profile.aiEnabled : null,
+    });
+
+    const automationEnabled = automationChain.effective;
+    const aiEnabled = aiChain.effective;
 
     return {
       message,
@@ -97,6 +115,8 @@ export class DecisionContextBuilder {
       thresholds,
       automationEnabled,
       aiEnabled,
+      automationChain,
+      aiChain,
       customerTags: [],
       now: new Date(),
     };

@@ -69,4 +69,12 @@ export enum CandidateSource {
   MANUAL = 'MANUAL',
   /** Declared for the phase that adds AI escalation. Nothing writes it in Phase 4. */
   AI_ESCALATION = 'AI_ESCALATION',
+  /**
+   * Harvested from the messages of a group that opted in to contributing knowledge.
+   *
+   * Worth distinguishing from MANUAL: a reviewer reading a queue should know that the question came
+   * out of a customer conversation rather than from a colleague who chose to write it down, because
+   * the two deserve different levels of scepticism.
+   */
+  GROUP_MESSAGES = 'GROUP_MESSAGES',
 }

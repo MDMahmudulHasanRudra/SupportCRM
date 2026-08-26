@@ -14,7 +14,12 @@ const reconnect = vi.fn();
 const connect = vi.fn();
 const qr = vi.fn();
 
-vi.mock('../api/client', () => ({
+// Partial mock: only the endpoints this file drives are replaced. The rest of the module has to
+// come through for real — `auth-context` narrows failures with `error instanceof ApiError`, and a
+// mock without that class turns a background `me()` call into an unhandled rejection that vitest
+// reports on whichever test happened to be running.
+vi.mock('../api/client', async (importOriginal) => ({
+  ...(await importOriginal<typeof import('../api/client')>()),
   get whatsapp() {
     return {
       reconnect: (...args: unknown[]) => reconnect(...args),

@@ -81,7 +81,13 @@ export class MessagesController {
     const limit = Math.min(query.limit ?? 50, 100);
     const offset = Math.max(query.offset ?? 0, 0);
 
-    const qb = this.messages.createQueryBuilder('m').orderBy('m.sentAt', 'DESC');
+    // `m.id` breaks ties: messages that share a `sentAt` (same-second arrivals, and every row of a
+    // backfill) otherwise have no defined order, and Postgres is free to return them differently per
+    // query — which makes LIMIT/OFFSET repeat one row on two pages and skip another.
+    const qb = this.messages
+      .createQueryBuilder('m')
+      .orderBy('m.sentAt', 'DESC')
+      .addOrderBy('m.id', 'DESC');
     if (query.channelAccountId) qb.andWhere('m.channelAccountId = :a', { a: query.channelAccountId });
     if (query.externalConversationId) {
       qb.andWhere('m.externalConversationId = :c', { c: query.externalConversationId });

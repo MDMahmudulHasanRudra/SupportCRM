@@ -24,12 +24,16 @@ import { CurrentUser, RequirePermissions } from '../rbac/permissions.guard';
 import { GroupParticipant } from './entities/group-participant.entity';
 import { Group, GroupMonitoringState } from './entities/group.entity';
 import { GroupSyncService } from './group-sync.service';
+import type { GroupListFilter } from './group-operations.service';
+import { GroupOperationsService, type GroupSort } from './group-operations.service';
+import { GroupAiStatusService } from './group-ai-status.service';
+import { QueryBoolean } from '../../common/http/query-boolean';
 
 export class ListGroupsDto {
   @IsOptional() @IsUUID() channelAccountId?: string;
   @IsOptional() @IsEnum(GroupMonitoringState) monitoringState?: GroupMonitoringState;
   @IsOptional() @IsString() @MaxLength(120) search?: string;
-  @IsOptional() @Type(() => Boolean) @IsBoolean() includeInactive?: boolean;
+  @IsOptional() @QueryBoolean() @IsBoolean() includeInactive?: boolean;
   @IsOptional() @Type(() => Number) @IsInt() @Min(1) @Max(200) limit?: number;
   @IsOptional() @Type(() => Number) @IsInt() @Min(0) offset?: number;
 }
@@ -38,10 +42,37 @@ export class UpdateGroupConfigDto {
   @IsOptional() @IsEnum(GroupMonitoringState) monitoringState?: GroupMonitoringState;
   @IsOptional() @IsBoolean() aiEnabled?: boolean;
   @IsOptional() @IsBoolean() automationEnabled?: boolean;
+  @IsOptional() @IsBoolean() patternAnalysisEnabled?: boolean;
+  @IsOptional() @IsBoolean() knowledgeContributionEnabled?: boolean;
+}
+
+/**
+ * The group operations query.
+ *
+ * Every filter is applied in SQL. Nothing here is a client-side convenience — with a few thousand
+ * groups the browser must never receive rows it is going to discard.
+ */
+export class GroupOperationsQueryDto {
+  @IsOptional() @IsUUID() channelAccountId?: string;
+  @IsOptional() @IsEnum(GroupMonitoringState) monitoringState?: GroupMonitoringState;
+  @IsOptional() @QueryBoolean() @IsBoolean() aiEnabled?: boolean;
+  @IsOptional() @QueryBoolean() @IsBoolean() automationEnabled?: boolean;
+  @IsOptional() @QueryBoolean() @IsBoolean() patternAnalysisEnabled?: boolean;
+  @IsOptional() @QueryBoolean() @IsBoolean() isActive?: boolean;
+  @IsOptional() @QueryBoolean() @IsBoolean() activeToday?: boolean;
+  @IsOptional() @QueryBoolean() @IsBoolean() knowledgeContributionEnabled?: boolean;
+  /** A profile id, or the literal `none` for groups without one. */
+  @IsOptional() @IsString() @MaxLength(64) knowledgeProfileId?: string;
+  @IsOptional() @IsString() @MaxLength(190) search?: string;
+
+  @IsOptional() @IsString() sort?: string;
+  @IsOptional() @IsString() direction?: string;
+  @IsOptional() @Type(() => Number) @IsInt() @Min(1) @Max(200) limit?: number;
+  @IsOptional() @Type(() => Number) @IsInt() @Min(0) offset?: number;
 }
 
 export class ListParticipantsDto {
-  @IsOptional() @Type(() => Boolean) @IsBoolean() includeInactive?: boolean;
+  @IsOptional() @QueryBoolean() @IsBoolean() includeInactive?: boolean;
   @IsOptional() @Type(() => Number) @IsInt() @Min(1) @Max(500) limit?: number;
   @IsOptional() @Type(() => Number) @IsInt() @Min(0) offset?: number;
 }
@@ -55,6 +86,8 @@ export class GroupsController {
     private readonly sync: GroupSyncService,
     private readonly accounts: ChannelAccountService,
     private readonly audit: AuditService,
+    private readonly operations: GroupOperationsService,
+    private readonly aiStatusService: GroupAiStatusService,
   ) {}
 
   /**
@@ -88,6 +121,60 @@ export class GroupsController {
     return { items: items.map(serializeGroup), total, limit, offset };
   }
 
+
+  /**
+   * The group operations list: filtered, sorted and counted server-side.
+   *
+   * Separate from `GET /groups` rather than replacing it — the existing route is used by the
+   * account screens and the conversations directory, and changing its shape would break both. This
+   * one carries the per-group counters and the wider filter set the operations screen needs.
+   */
+  @Get('operations/list')
+  @RequirePermissions('groups.read')
+  @ApiOperation({ summary: 'Groups with activity counters, filtered and sorted for the operations screen' })
+  async operationsList(@Query() query: GroupOperationsQueryDto) {
+    const sort = (ALLOWED_SORTS.includes(query.sort as GroupSort) ? query.sort : 'lastActivity') as GroupSort;
+    const direction = query.direction?.toUpperCase() === 'ASC' ? 'ASC' : 'DESC';
+
+    return this.operations.list(
+      toFilter(query),
+      { limit: Math.min(query.limit ?? 50, 200), offset: Math.max(query.offset ?? 0, 0), sort, direction },
+    );
+  }
+
+  /**
+   * The header figures.
+   *
+   * `since` is the operator's day boundary, supplied by the caller rather than assumed here — the
+   * server's timezone is not necessarily the one the person reading "active today" lives in.
+   */
+  @Get('operations/summary')
+  @RequirePermissions('groups.read')
+  @ApiOperation({ summary: 'Counts across every group, for the operations header' })
+  async operationsSummary(@Query('since') since?: string) {
+    const from = since ? new Date(since) : startOfToday();
+    if (Number.isNaN(from.getTime())) throw new BadRequestException('That date could not be read.');
+    return this.operations.summary(from);
+  }
+
+  /**
+   * Resolves a filter to the ids it matches, so "select all" can mean every matching group rather
+   * than the page in front of the operator.
+   *
+   * Capped: past a few thousand an operator should be narrowing the filter, not selecting harder,
+   * and the bulk pipeline enforces its own ceiling on top of this.
+   */
+  @Get('operations/matching-ids')
+  @RequirePermissions('groups.read')
+  @ApiOperation({ summary: 'Every group id matching a filter, for select-all-filtered' })
+  async matchingIds(@Query() query: GroupOperationsQueryDto) {
+    const ids = await this.operations.idsMatching(
+      toFilter(query),
+      10_000,
+    );
+    return { ids, total: ids.length };
+  }
+
   @Get(':id')
   @RequirePermissions('groups.read')
   @ApiOperation({ summary: 'One group with its configuration and sync timestamps' })
@@ -97,6 +184,19 @@ export class GroupsController {
 
     const activeParticipants = await this.participants.count({ where: { groupId: id, isActive: true } });
     return { ...serializeGroup(group), activeParticipants };
+  }
+
+  /**
+   * Why AI can or cannot reply here.
+   *
+   * Read-only diagnosis. The engine composes its own permission per message and is unaffected by
+   * this endpoint; it exists so the console can name the switch rather than show a dead toggle.
+   */
+  @Get(':id/ai-status')
+  @RequirePermissions('groups.read')
+  @ApiOperation({ summary: 'The effective AI permission for a group, and what is withholding it' })
+  async aiStatus(@Param('id') id: string) {
+    return this.aiStatusService.forGroup(id);
   }
 
   @Get(':id/participants')
@@ -277,12 +377,20 @@ export class GroupsController {
       monitoringState: group.monitoringState,
       aiEnabled: group.aiEnabled,
       automationEnabled: group.automationEnabled,
+      patternAnalysisEnabled: group.patternAnalysisEnabled,
+      knowledgeContributionEnabled: group.knowledgeContributionEnabled,
     };
 
     await this.groups.update(id, {
       ...(dto.monitoringState !== undefined ? { monitoringState: dto.monitoringState } : {}),
       ...(dto.aiEnabled !== undefined ? { aiEnabled: dto.aiEnabled } : {}),
       ...(dto.automationEnabled !== undefined ? { automationEnabled: dto.automationEnabled } : {}),
+      ...(dto.patternAnalysisEnabled !== undefined
+        ? { patternAnalysisEnabled: dto.patternAnalysisEnabled }
+        : {}),
+      ...(dto.knowledgeContributionEnabled !== undefined
+        ? { knowledgeContributionEnabled: dto.knowledgeContributionEnabled }
+        : {}),
     });
 
     const updated = await this.groups.findOne({ where: { id } });
@@ -296,6 +404,7 @@ export class GroupsController {
           monitoringState: updated!.monitoringState,
           aiEnabled: updated!.aiEnabled,
           automationEnabled: updated!.automationEnabled,
+          patternAnalysisEnabled: updated!.patternAnalysisEnabled,
         },
       },
       this.audit.actorFromRequest(request, user),
@@ -319,8 +428,50 @@ function serializeGroup(group: Group) {
     monitoringState: group.monitoringState,
     aiEnabled: group.aiEnabled,
     automationEnabled: group.automationEnabled,
+    patternAnalysisEnabled: group.patternAnalysisEnabled,
+    knowledgeContributionEnabled: group.knowledgeContributionEnabled,
+    knowledgeProfileId: group.knowledgeProfileId,
     lastSyncedAt: group.lastSyncedAt,
     participantsSyncedAt: group.participantsSyncedAt,
     lastMessageAt: group.lastMessageAt,
+  };
+}
+
+/** The sort keys the operations list accepts. A whitelist — `sort` arrives from a query string. */
+const ALLOWED_SORTS: string[] = [
+  'name',
+  'members',
+  'lastActivity',
+  'messagesToday',
+  'aiRepliesToday',
+  'humanSupportToday',
+];
+
+/** Midnight today, server time. Used only when the caller supplies no boundary of its own. */
+function startOfToday(): Date {
+  const now = new Date();
+  return new Date(now.getFullYear(), now.getMonth(), now.getDate());
+}
+
+/**
+ * The one place a query string becomes a group filter.
+ *
+ * Both the page and "select all matching" go through this. They must resolve the *same* set: if the
+ * two mappings drift by a single field, an operator selects "all 1,842 matching" from a filtered
+ * view and the bulk operation lands on a different 1,842 groups — silently, with a plausible count
+ * and a successful job. One function makes that particular disagreement impossible to write.
+ */
+function toFilter(query: GroupOperationsQueryDto): GroupListFilter {
+  return {
+    channelAccountId: query.channelAccountId,
+    monitoringState: query.monitoringState,
+    aiEnabled: query.aiEnabled,
+    automationEnabled: query.automationEnabled,
+    activeToday: query.activeToday,
+    knowledgeContributionEnabled: query.knowledgeContributionEnabled,
+    knowledgeProfileId: query.knowledgeProfileId,
+    patternAnalysisEnabled: query.patternAnalysisEnabled,
+    isActive: query.isActive,
+    search: query.search,
   };
 }

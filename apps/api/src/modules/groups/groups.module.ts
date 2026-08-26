@@ -11,6 +11,11 @@ import { AuditModule } from '../audit/audit.module';
 import { GroupOnboardingController } from './group-onboarding.controller';
 import { GroupOnboardingService } from './group-onboarding.service';
 import { GroupSyncService } from './group-sync.service';
+import { GroupOperationsService } from './group-operations.service';
+import { GroupAiStatusService } from './group-ai-status.service';
+import { AutomationProfile } from '../automation/entities/automation-profile.entity';
+import { ChannelAccount } from '../channel/entities/channel-account.entity';
+import { SettingsModule } from '../settings/settings.module';
 import { GroupsController } from './groups.controller';
 import { ParticipantSyncHandler } from './participant-sync.handler';
 
@@ -24,7 +29,10 @@ const isWorker = process.env.RUN_MODE === 'worker';
  */
 @Module({
   imports: [
-    TypeOrmModule.forFeature([Group, GroupParticipant, GroupOnboardingRule]),
+    // AutomationProfile and ChannelAccount are read-only here: the AI status endpoint reports the
+    // profile and session that govern a group, and owns neither.
+    TypeOrmModule.forFeature([Group, GroupParticipant, GroupOnboardingRule, AutomationProfile, ChannelAccount]),
+    SettingsModule,
     JobsModule,
     RealtimeModule,
     TeamModule,
@@ -35,7 +43,7 @@ const isWorker = process.env.RUN_MODE === 'worker';
   // "onboarding-rules" and then fails as an invalid UUID. Nest resolves routes in registration
   // order, so the specific controller is registered first.
   controllers: [GroupOnboardingController, GroupsController],
-  providers: [GroupSyncService, GroupOnboardingService, ...(isWorker ? [ParticipantSyncHandler] : [])],
-  exports: [GroupSyncService, GroupOnboardingService, TypeOrmModule],
+  providers: [GroupSyncService, GroupOperationsService, GroupAiStatusService, GroupOnboardingService, ...(isWorker ? [ParticipantSyncHandler] : [])],
+  exports: [GroupSyncService, GroupOperationsService, GroupAiStatusService, GroupOnboardingService, TypeOrmModule],
 })
 export class GroupsModule {}

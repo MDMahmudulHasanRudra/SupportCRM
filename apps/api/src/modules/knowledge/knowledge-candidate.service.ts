@@ -55,6 +55,8 @@ export class KnowledgeCandidateService {
       categoryId?: string | null;
       scopeType?: KnowledgeScopeType;
       scopeId?: string | null;
+      /** Defaults to MANUAL — a caller has to claim a different origin deliberately. */
+      sourceType?: CandidateSource;
     },
     userId: string | null,
   ): Promise<KnowledgeCandidate> {
@@ -73,8 +75,9 @@ export class KnowledgeCandidateService {
       this.candidates.create({
         question,
         context: input.context?.trim() || null,
-        // Always MANUAL. Phase 4 has nothing that could legitimately claim another source.
-        sourceType: CandidateSource.MANUAL,
+        // Defaults to MANUAL. The group harvester passes GROUP_MESSAGES so a reviewer can see that
+        // a question came out of a customer conversation rather than from a colleague writing it up.
+        sourceType: input.sourceType ?? CandidateSource.MANUAL,
         status: CandidateStatus.OPEN,
         categoryId: input.categoryId ?? null,
         scopeType: input.scopeType ?? KnowledgeScopeType.GLOBAL,
