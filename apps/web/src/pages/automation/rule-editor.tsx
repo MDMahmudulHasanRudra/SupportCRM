@@ -465,7 +465,7 @@ export function AutomationRuleEditorPage() {
               {testResult.wouldSend && (
                 <div className="card card-pad">
                   <div className="muted small">It would reply:</div>
-                  <div>{testResult.wouldSend}</div>
+                  <div style={{ overflowWrap: 'anywhere' }}>{testResult.wouldSend}</div>
                 </div>
               )}
               {testResult.matched

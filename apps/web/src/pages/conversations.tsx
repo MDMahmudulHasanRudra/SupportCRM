@@ -478,11 +478,11 @@ export function ConversationsPage() {
             />
           ) : (
             <>
-              <div className="thread-head">
+              <div className="thread-head" style={{ flexWrap: 'wrap' }}>
                 <span className={destination.kind === 'GROUP' ? 'conv-avatar group' : 'conv-avatar'}>
                   {destination.kind === 'GROUP' ? <IconUsers size={16} /> : <IconMessageCircle size={16} />}
                 </span>
-                <div style={{ flex: 1, minWidth: 0 }}>
+                <div style={{ flex: 1, minWidth: 0, overflowWrap: 'anywhere' }}>
                   <div className="thread-head-title">{destination.name}</div>
                   <div className="muted small">
                     {destination.subtitle}
@@ -564,7 +564,7 @@ export function ConversationsPage() {
                     <div key={message.id}>
                       {showDay && <div className="thread-day">{dayLabel(message.sentAt)}</div>}
                       <div className={`msg-row ${message.direction === 'OUTBOUND' ? 'outbound' : 'inbound'}`}>
-                        <div className={`msg-bubble${automated ? ' automated' : ''}`}>
+                        <div className={`msg-bubble${automated ? ' automated' : ''}`} style={{ overflowWrap: 'anywhere' }}>
                           {message.contentType === 'TEXT' ? (message.body ?? '') : `[${humanise(message.contentType)}]`}
                           <div className="msg-meta">
                             {message.direction === 'INBOUND'
@@ -586,7 +586,10 @@ export function ConversationsPage() {
                     stays put with its reason and a retry — never silently dropped. */}
                 {pending.map((item) => (
                   <div key={item.id} className="msg-row outbound">
-                    <div className={item.state === 'failed' ? 'msg-bubble failed' : 'msg-bubble sending'}>
+                    <div
+                      className={item.state === 'failed' ? 'msg-bubble failed' : 'msg-bubble sending'}
+                      style={{ overflowWrap: 'anywhere' }}
+                    >
                       {item.body}
                       <div className="msg-meta">
                         {item.state === 'sending' ? (
@@ -662,7 +665,7 @@ export function ConversationsPage() {
             <>
               <div className="info-pane-section">
                 <div className="info-pane-label">{destination.kind === 'GROUP' ? 'Group' : 'Contact'}</div>
-                <div style={{ fontWeight: 600 }}>{customer?.displayName ?? destination.name}</div>
+                <div style={{ fontWeight: 600, overflowWrap: 'anywhere' }}>{customer?.displayName ?? destination.name}</div>
                 <div className="muted small">{destination.subtitle}</div>
                 {customer ? (
                   <div className="small" style={{ marginTop: 4 }}>
@@ -780,7 +783,7 @@ export function ConversationsPage() {
                   ) : (
                     <div className="stack" style={{ gap: 4 }}>
                       {participants.slice(0, 8).map((participant) => (
-                        <div key={participant.id} className="small">
+                        <div key={participant.id} className="small" style={{ overflowWrap: 'anywhere' }}>
                           {participant.displayName ?? participant.phone ?? participant.externalId}
                           {participant.isAdmin && <span className="muted"> · admin</span>}
                         </div>
@@ -884,7 +887,7 @@ function NewMessageDialog({
                     <span className="conv-avatar">
                       <IconMessageCircle size={14} />
                     </span>
-                    <span style={{ minWidth: 0 }}>
+                    <span style={{ minWidth: 0, overflowWrap: 'anywhere' }}>
                       <span className="picker-name">{item.name}</span>
                       <span className="picker-sub">{item.subtitle}</span>
                     </span>
@@ -903,7 +906,7 @@ function NewMessageDialog({
                     <span className="conv-avatar group">
                       <IconUsers size={14} />
                     </span>
-                    <span style={{ minWidth: 0 }}>
+                    <span style={{ minWidth: 0, overflowWrap: 'anywhere' }}>
                       <span className="picker-name">{item.name}</span>
                       <span className="picker-sub">
                         {item.subtitle}

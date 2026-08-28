@@ -248,7 +248,9 @@ export function CandidatesPage() {
                 ) : (
                   <ul className="steps">
                     {evidence.slice(0, 5).map((message) => (
-                      <li key={message.id}>{(message.body ?? '').slice(0, 200)}</li>
+                      <li key={message.id} style={{ overflowWrap: 'anywhere' }}>
+                        {(message.body ?? '').slice(0, 200)}
+                      </li>
                     ))}
                   </ul>
                 )}

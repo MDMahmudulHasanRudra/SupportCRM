@@ -319,7 +319,7 @@ export function CopilotPage() {
                 <strong>Tool:</strong> <span className="mono">{confirming.tool}</span>
               </div>
               {confirming.arguments && Object.keys(confirming.arguments).length > 0 && (
-                <pre className="mono" style={{ margin: 0 }}>{JSON.stringify(confirming.arguments, null, 2)}</pre>
+                <pre className="mono" style={{ margin: 0, overflowX: 'auto' }}>{JSON.stringify(confirming.arguments, null, 2)}</pre>
               )}
               <div className="muted small">
                 Nothing has happened yet. Declining leaves everything exactly as it is.

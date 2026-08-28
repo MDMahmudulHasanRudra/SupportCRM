@@ -237,7 +237,7 @@ export function CustomersPage() {
                   {notes && notes.length === 0 && <div className="muted small">No notes yet.</div>}
                   {notes?.map((note) => (
                     <div key={note.id} className="card card-pad" style={{ background: 'var(--surface-2)' }}>
-                      <div style={{ whiteSpace: 'pre-wrap' }}>{note.body}</div>
+                      <div style={{ whiteSpace: 'pre-wrap', overflowWrap: 'anywhere' }}>{note.body}</div>
                       <div className="muted small" style={{ marginTop: 6 }}>
                         {note.authorUsername ?? 'Someone'} · <RelativeTime value={note.createdAt} />
                       </div>

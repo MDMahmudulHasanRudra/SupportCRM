@@ -232,12 +232,16 @@ export function BroadcastsPage() {
               />
             </div>
 
+            {/* Not `.table-wrap` on purpose: that class forces `table { min-width: 560px }` for
+                genuinely wide data tables, which would force this simple checkbox+count list into a
+                second, horizontal scrollbar nested inside this already-vertically-scrolling box on a
+                narrow screen. This table only needs the global `table { width: 100% }`. */}
             {groups.length === 0 ? (
               <p className="muted small">No active groups on this account.</p>
             ) : visibleGroups.length === 0 ? (
               <p className="muted small">No group matches that filter.</p>
             ) : (
-              <div className="table-wrap" style={{ maxHeight: 260, overflowY: 'auto' }}>
+              <div style={{ maxHeight: 260, overflowY: 'auto' }}>
                 <table>
                   <tbody>
                     {visibleGroups.map((group) => (
@@ -354,10 +358,12 @@ export function BroadcastsPage() {
         <div className="backdrop" role="dialog" aria-modal="true" aria-label="Broadcast details">
           <div className="dialog" style={{ width: 'min(680px, 100%)' }}>
             <div className="dialog-head">
-              <h2>{inspecting.name}</h2>
+              <h2 style={{ overflowWrap: 'anywhere' }}>{inspecting.name}</h2>
             </div>
             <div className="dialog-body stack">
-              <Card title="The message">{inspecting.body}</Card>
+              <Card title="The message">
+                <div style={{ overflowWrap: 'anywhere' }}>{inspecting.body}</div>
+              </Card>
 
               {inspecting.status === 'DRAFT' ? (
                 <>
@@ -371,7 +377,7 @@ export function BroadcastsPage() {
                         <strong>
                           {preview.total} recipient{preview.total === 1 ? '' : 's'}
                         </strong>
-                        <ul className="steps">
+                        <ul className="steps" style={{ overflowWrap: 'anywhere' }}>
                           {preview.sample.map((entry) => (
                             <li key={entry.externalConversationId}>
                               {entry.displayName ?? entry.externalConversationId}
@@ -489,7 +495,9 @@ export function BroadcastsPage() {
               {!confirming.testSentAt && (
                 <div className="alert">You have not sent yourself a test of this message.</div>
               )}
-              <div className="card card-pad">{confirming.body}</div>
+              <div className="card card-pad" style={{ overflowWrap: 'anywhere' }}>
+                {confirming.body}
+              </div>
             </div>
           }
           onConfirm={() => void start(confirming)}

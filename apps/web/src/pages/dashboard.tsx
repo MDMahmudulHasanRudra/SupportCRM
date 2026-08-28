@@ -136,8 +136,14 @@ export function DashboardPage() {
   const needsAttention = accounts?.filter((account) => account.canConnect) ?? [];
   const opsReady = !!ops.data;
 
+  // A negative duration isn't a smaller number, it's not a duration — treat it the same as
+  // "nothing measured yet" rather than print a value nobody could act on.
   const seconds = (value: number | null | undefined) =>
-    value === null || value === undefined ? null : value < 90 ? `${value}s` : `${Math.round(value / 60)}m`;
+    value === null || value === undefined || value < 0
+      ? null
+      : value < 90
+        ? `${value}s`
+        : `${Math.round(value / 60)}m`;
 
   return (
     <>
