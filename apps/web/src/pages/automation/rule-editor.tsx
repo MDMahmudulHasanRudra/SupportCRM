@@ -12,7 +12,8 @@ import {
   type RuleCondition,
 } from '../../api/client';
 import { useAuth } from '../../auth-context';
-import { errorMessage, useToast } from '../../components/ui';
+import { IconAlertCircle } from '../../components/icons';
+import { ErrorState, Loading, errorMessage, useToast } from '../../components/ui';
 import { RuleStatusChip } from './chips';
 
 const CONDITION_TYPES: Array<{ value: ConditionType; label: string; hint: string }> = [
@@ -153,12 +154,9 @@ export function AutomationRuleEditorPage() {
 
   if (!rule) {
     return error ? (
-      <div className="alert">{error}</div>
+      <ErrorState message={error} onRetry={() => void load()} icon={<IconAlertCircle size={20} />} />
     ) : (
-      <div className="progress">
-        <span className="spinner" aria-hidden="true" />
-        <span className="muted">Loading…</span>
-      </div>
+      <Loading />
     );
   }
 

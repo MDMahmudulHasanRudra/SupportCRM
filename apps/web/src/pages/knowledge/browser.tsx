@@ -9,7 +9,9 @@ import {
   type RetrievedChunk,
 } from '../../api/client';
 import { useAuth } from '../../auth-context';
+import { IconBookOpen, IconInbox } from '../../components/icons';
 import { RelativeTime } from '../../components/status-badge';
+import { Empty } from '../../components/ui';
 import { KnowledgeStatusChip, DocumentStatusChip } from './status-chips';
 import { UploadPanel } from './upload-panel';
 
@@ -192,10 +194,11 @@ export function KnowledgeBrowserPage() {
             {articles === null ? (
               <div className="empty">Loading…</div>
             ) : articles.length === 0 ? (
-              <div className="empty">
-                <h2>No articles yet</h2>
-                <p>Write one, or upload a document to index.</p>
-              </div>
+              <Empty
+                title="No articles yet"
+                hint="Write one, or upload a document to index."
+                icon={<IconBookOpen size={20} />}
+              />
             ) : (
               <div className="table-wrap">
                 <table>
@@ -243,10 +246,11 @@ export function KnowledgeBrowserPage() {
 
           <div className="card">
             {documents.length === 0 ? (
-              <div className="empty">
-                <h2>No documents yet</h2>
-                <p>Upload a PDF, Word document, text file or Markdown to index it.</p>
-              </div>
+              <Empty
+                title="No documents yet"
+                hint="Upload a PDF, Word document, text file or Markdown to index it."
+                icon={<IconInbox size={20} />}
+              />
             ) : (
               <div className="table-wrap">
                 <table>
@@ -331,7 +335,7 @@ export function KnowledgeBrowserPage() {
           {results && (
             <div className="card">
               {results.chunks.length === 0 ? (
-                <div className="empty">Nothing matched.</div>
+                <Empty title="Nothing matched." icon={<IconInbox size={20} />} />
               ) : (
                 <div className="stack card-pad">
                   {results.chunks.map((chunk) => (

@@ -11,7 +11,8 @@ import {
   type WhatsAppAccount,
 } from '../../api/client';
 import { useAuth } from '../../auth-context';
-import { errorMessage, useToast } from '../../components/ui';
+import { IconAlertCircle } from '../../components/icons';
+import { ErrorState, errorMessage, useToast } from '../../components/ui';
 
 const OPERATIONS: Array<{ value: BulkOperation; label: string; needsProfile?: boolean }> = [
   { value: 'ENABLE_AUTOMATION', label: 'Turn automation on' },
@@ -52,18 +53,21 @@ export function BulkActionsPage() {
   const poll = useRef<number | null>(null);
   const canRun = can('groups.bulk_update');
 
-  useEffect(() => {
-    void (async () => {
-      try {
-        const [accountList, profileList] = await Promise.all([whatsapp.overview(), automation.profiles()]);
-        setAccounts(accountList.items);
-        setProfiles(profileList.items);
-        if (accountList.items[0]) setAccountId(accountList.items[0].id);
-      } catch (failure) {
-        setError(failure instanceof Error ? failure.message : 'Could not load accounts.');
-      }
-    })();
+  const load = useCallback(async () => {
+    try {
+      const [accountList, profileList] = await Promise.all([whatsapp.overview(), automation.profiles()]);
+      setAccounts(accountList.items);
+      setProfiles(profileList.items);
+      if (accountList.items[0]) setAccountId(accountList.items[0].id);
+      setError(null);
+    } catch (failure) {
+      setError(errorMessage(failure, 'Could not load accounts.'));
+    }
   }, []);
+
+  useEffect(() => {
+    void load();
+  }, [load]);
 
   // A queued job finishes on the worker, not here; the page follows it until it stops moving.
   const follow = useCallback((id: string) => {
@@ -151,7 +155,7 @@ export function BulkActionsPage() {
         the job runs, so the set cannot drift between reading it and starting it.
       </p>
 
-      {error && <div className="alert">{error}</div>}
+      {error && <ErrorState message={error} onRetry={() => void load()} icon={<IconAlertCircle size={20} />} />}
 
       <div className="card card-pad stack">
         <label>

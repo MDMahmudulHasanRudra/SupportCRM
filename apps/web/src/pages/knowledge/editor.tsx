@@ -8,7 +8,9 @@ import {
   type KnowledgeVersion,
 } from '../../api/client';
 import { useAuth } from '../../auth-context';
+import { IconAlertCircle } from '../../components/icons';
 import { RelativeTime } from '../../components/status-badge';
+import { ErrorState, Loading } from '../../components/ui';
 import { KnowledgeStatusChip, describeKnowledgeStatus } from './status-chips';
 
 /**
@@ -148,7 +150,11 @@ export function KnowledgeEditorPage() {
         <div className="page-head">
           <h1>Article</h1>
         </div>
-        {error ? <div className="alert">{error}</div> : <p className="muted">Loading…</p>}
+        {error ? (
+          <ErrorState message={error} onRetry={() => void load()} icon={<IconAlertCircle size={20} />} />
+        ) : (
+          <Loading label="Loading…" />
+        )}
       </>
     );
   }
@@ -207,7 +213,7 @@ export function KnowledgeEditorPage() {
               width: '100%',
               font: 'inherit',
               padding: '9px 12px',
-              borderRadius: 8,
+              borderRadius: 'var(--radius-sm)',
               border: '1px solid var(--border)',
               background: 'var(--bg)',
               color: 'var(--text)',

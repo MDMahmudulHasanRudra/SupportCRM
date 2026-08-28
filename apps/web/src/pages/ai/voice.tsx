@@ -2,7 +2,8 @@ import { useCallback, useEffect, useState } from 'react';
 import { Link } from 'react-router-dom';
 import { ai, type AIConfigurationRow, type AIProviderRow } from '../../api/client';
 import { useAuth } from '../../auth-context';
-import { Loading, PageHeader, errorMessage, useToast } from '../../components/ui';
+import { IconAlertCircle } from '../../components/icons';
+import { ErrorState, Loading, PageHeader, errorMessage, useToast } from '../../components/ui';
 
 const TONES = ['neutral', 'friendly', 'formal', 'concise'];
 const LANGUAGES = [
@@ -154,7 +155,7 @@ export function AIVoicePage() {
         their extra instructions are added to these rather than replacing them.
       </p>
 
-      {error && <div className="alert">{error}</div>}
+      {error && <ErrorState message={error} onRetry={() => void load()} icon={<IconAlertCircle size={20} />} />}
       {saved && <div className="hint">Saved.</div>}
 
       <div className="card card-pad stack">

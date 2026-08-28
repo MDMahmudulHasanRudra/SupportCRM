@@ -8,7 +8,8 @@ import {
   type RuleConditionSet,
 } from '../../api/client';
 import { useAuth } from '../../auth-context';
-import { errorMessage, useToast } from '../../components/ui';
+import { IconAlertCircle, IconZap } from '../../components/icons';
+import { Empty, ErrorState, Loading, errorMessage, useToast } from '../../components/ui';
 import { RuleStatusChip } from './chips';
 
 /**
@@ -116,7 +117,7 @@ export function AutomationRulesPage() {
         execute something the system did not intend.
       </p>
 
-      {error && <div className="alert">{error}</div>}
+      {error && <ErrorState message={error} onRetry={() => void load()} icon={<IconAlertCircle size={20} />} />}
 
       {waiting.length > 0 && (
         <div className="card card-pad stack">
@@ -170,15 +171,13 @@ export function AutomationRulesPage() {
       </div>
 
       {rules === null ? (
-        <div className="progress">
-          <span className="spinner" aria-hidden="true" />
-          <span className="muted">Loading rules…</span>
-        </div>
+        <Loading label="Loading rules…" />
       ) : rules.length === 0 ? (
-        <div className="empty">
-          No rules yet. A rule answers the questions that always have the same answer, so the AI is
-          only asked the ones that do not.
-        </div>
+        <Empty
+          title="No rules yet."
+          hint="A rule answers the questions that always have the same answer, so the AI is only asked the ones that do not."
+          icon={<IconZap size={20} />}
+        />
       ) : (
         <div className="table-wrap">
           <table>

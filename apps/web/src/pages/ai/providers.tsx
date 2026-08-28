@@ -2,7 +2,8 @@ import { useCallback, useEffect, useState } from 'react';
 import { Link } from 'react-router-dom';
 import { ai, type AIConfigurationRow, type AIProviderKind, type AIProviderRow } from '../../api/client';
 import { useAuth } from '../../auth-context';
-import { errorMessage, useToast } from '../../components/ui';
+import { IconAlertCircle, IconBot } from '../../components/icons';
+import { Empty, ErrorState, Loading, PageHeader, errorMessage, useToast } from '../../components/ui';
 
 const KINDS: Array<{ value: AIProviderKind; label: string; hint: string }> = [
   { value: 'openai', label: 'OpenAI', hint: 'api.openai.com' },
@@ -125,36 +126,31 @@ export function AIProvidersPage() {
 
   return (
     <>
-      <div className="page-head">
-        <h1>AI providers</h1>
-        <div className="row">
-          <Link to="/ai/voice" className="small">
-            Voice &amp; instructions →
-          </Link>
-          <Link to="/automation/profiles" className="small">
-            Confidence thresholds →
-          </Link>
-        </div>
-      </div>
+      <PageHeader
+        title="AI providers"
+        description="Providers are tried in priority order. One that fails repeatedly is rested rather than hammered, and the next takes over. If every provider is down, the system asks a person — it never guesses an answer."
+        actions={
+          <>
+            <Link to="/ai/voice" className="small">
+              Voice &amp; instructions →
+            </Link>
+            <Link to="/automation/profiles" className="small">
+              Confidence thresholds →
+            </Link>
+          </>
+        }
+      />
 
-      <p className="page-sub">
-        Providers are tried in priority order. One that fails repeatedly is rested rather than
-        hammered, and the next takes over. If every provider is down, the system asks a person — it
-        never guesses an answer.
-      </p>
-
-      {error && <div className="alert">{error}</div>}
+      {error && <ErrorState message={error} onRetry={() => void load()} icon={<IconAlertCircle size={20} />} />}
 
       {providers === null ? (
-        <div className="progress">
-          <span className="spinner" aria-hidden="true" />
-          <span className="muted">Loading…</span>
-        </div>
+        <Loading />
       ) : providers.length === 0 ? (
-        <div className="empty">
-          No AI provider is configured. Rules still run; anything a rule cannot answer goes to a
-          person.
-        </div>
+        <Empty
+          title="No AI provider is configured"
+          hint="Rules still run; anything a rule cannot answer goes to a person."
+          icon={<IconBot size={20} />}
+        />
       ) : (
         <div className="table-wrap">
           <table>

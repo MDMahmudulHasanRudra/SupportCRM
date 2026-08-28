@@ -82,13 +82,13 @@ export function KnowledgeCandidatesPage() {
       </p>
 
       {error && (
-        <div className="alert" style={{ marginBottom: 16 }}>
+        <div className="alert" style={{ marginBottom: 'var(--space-7)' }}>
           {error}
         </div>
       )}
 
       {canWrite && (
-        <div className="card card-pad" style={{ marginBottom: 16 }}>
+        <div className="card card-pad" style={{ marginBottom: 'var(--space-7)' }}>
           <div className="row">
             <input
               placeholder="What are customers asking that we cannot answer?"
