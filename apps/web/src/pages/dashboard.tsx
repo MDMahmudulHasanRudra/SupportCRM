@@ -253,6 +253,7 @@ export function DashboardPage() {
                   { key: 'automated', label: 'Answered automatically', color: 'var(--ok)' },
                   { key: 'escalations', label: 'Escalated', color: 'var(--danger)' },
                 ]}
+                height={210}
               />
             )}
           </Card>

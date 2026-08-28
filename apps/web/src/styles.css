@@ -722,8 +722,8 @@ button.danger:hover:not(:disabled) { filter: brightness(1.1); }
 
 .stat-grid {
   display: grid;
-  grid-template-columns: repeat(auto-fit, minmax(168px, 1fr));
-  gap: 12px;
+  grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
+  gap: var(--space-6);
 }
 
 .stat {
@@ -813,8 +813,15 @@ button.danger:hover:not(:disabled) { filter: brightness(1.1); }
   align-items: start;
   margin-top: 14px;
 }
-@media (max-width: 1120px) {
+/* Two collapse steps rather than one: a straight 3-column-to-1 jump wastes the 900-1200px range
+   (tablet widths, or a desktop with the sidebar expanded) where two columns still fit comfortably. */
+@media (max-width: 1200px) {
+  .dash-cols-3 { grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); }
+  .dash-cols-3 > :nth-child(2) { grid-column: 1 / -1; }
+}
+@media (max-width: 700px) {
   .dash-cols-3 { grid-template-columns: minmax(0, 1fr); }
+  .dash-cols-3 > :nth-child(2) { grid-column: auto; }
 }
 
 /* A row list used by the activity feed, the health panel and the attention panel — same rhythm for

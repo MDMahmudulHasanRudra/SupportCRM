@@ -419,8 +419,8 @@ export function Donut({
   centerLabel?: string;
 }) {
   const total = segments.reduce((sum, s) => sum + s.value, 0);
-  const size = 108;
-  const stroke = 16;
+  const size = 128;
+  const stroke = 18;
   const radius = (size - stroke) / 2;
   const circumference = 2 * Math.PI * radius;
 
