@@ -1,12 +1,14 @@
 import { useCallback, useEffect, useState } from 'react';
 import { Link } from 'react-router-dom';
 import {
+  activityAnalytics,
   audit,
   health as healthApi,
   reports,
   whatsapp,
   type ActivityTrendPoint,
   type AuditEntry,
+  type BroadcastReportRow,
   type DashboardReport,
   type HealthReport,
   type WhatsAppAccount,
@@ -18,13 +20,17 @@ import {
   IconAlertCircle,
   IconCheckCircle,
   IconClock,
+  IconLightbulb,
+  IconMegaphone,
   IconMessageCircle,
   IconRadio,
   IconSend,
+  IconUserCircle,
 } from '../components/icons';
 import {
   Badge,
   Card,
+  CoverageBar,
   Donut,
   Empty,
   ErrorState,
@@ -37,6 +43,9 @@ import {
   humanise,
 } from '../components/ui';
 import { DashboardOperations } from './dashboard-operations';
+
+/** What the pattern-detection panel needs — the same shape `/reports/patterns` returns. */
+type PatternsReport = Awaited<ReturnType<typeof activityAnalytics.patterns>>;
 
 /**
  * The landing page.
@@ -58,6 +67,8 @@ export function DashboardPage() {
   const [reportError, setReportError] = useState<string | null>(null);
   const [system, setSystem] = useState<HealthReport | null>(null);
   const [activity, setActivity] = useState<AuditEntry[] | null>(null);
+  const [patterns, setPatterns] = useState<PatternsReport | null>(null);
+  const [broadcastRows, setBroadcastRows] = useState<BroadcastReportRow[] | null>(null);
 
   const canSeeReports = can('reports.view');
   const canSeeAudit = can('audit.view');
@@ -79,6 +90,20 @@ export function DashboardPage() {
     }
   }, [canSeeReports]);
 
+  // Best-effort, like health/audit below: the pattern-detection and broadcast panels are a bonus
+  // view onto data the rest of the app already surfaces in full elsewhere (the automation candidate
+  // queue, the reports page), so a failure here shouldn't take down the figures above.
+  const loadPatterns = useCallback(async () => {
+    if (!canSeeReports) return;
+    setPatterns(await activityAnalytics.patterns(5).catch(() => null));
+  }, [canSeeReports]);
+
+  const loadBroadcasts = useCallback(async () => {
+    if (!canSeeReports) return;
+    const { items } = await reports.broadcasts().catch(() => ({ items: [] as BroadcastReportRow[] }));
+    setBroadcastRows(items.slice(0, 5));
+  }, [canSeeReports]);
+
   // Health and audit are best-effort: a dashboard that fails wholesale because one panel could not
   // load is worse than one panel quietly saying it has nothing.
   const loadSystem = useCallback(async () => {
@@ -96,7 +121,9 @@ export function DashboardPage() {
     void loadReport();
     void loadSystem();
     void loadActivity();
-  }, [loadAccounts, loadReport, loadSystem, loadActivity]);
+    void loadPatterns();
+    void loadBroadcasts();
+  }, [loadAccounts, loadReport, loadSystem, loadActivity, loadPatterns, loadBroadcasts]);
 
   useEffect(() => onChannelStatus(() => void loadAccounts()), [loadAccounts]);
 
@@ -183,6 +210,20 @@ export function DashboardPage() {
                 tone={report.health.failedOutbound > 0 ? 'bad' : 'ok'}
                 icon={<IconSend size={17} />}
                 iconColor={report.health.failedOutbound > 0 ? 'bad' : 'ok'}
+              />
+              <Stat
+                label="Human handled"
+                value={report.conversations.humanHandled}
+                hint="Last 7 days"
+                icon={<IconUserCircle size={17} />}
+                iconColor="accent"
+              />
+              <Stat
+                label="Resolution time"
+                value={seconds(report.timing.resolutionSeconds)}
+                hint="Average"
+                icon={<IconClock size={17} />}
+                iconColor="blue"
               />
             </StatGrid>
           )}
@@ -327,6 +368,46 @@ export function DashboardPage() {
           </Card>
         )}
 
+        {report && Object.keys(report.conversations.byStatus).length > 0 && (
+          <Card title="Conversations by status">
+            <div className="stack" style={{ gap: 10 }}>
+              {Object.entries(report.conversations.byStatus)
+                .sort((a, b) => b[1] - a[1])
+                .map(([status, count]) => (
+                  <CoverageBar
+                    key={status}
+                    label={humanise(status)}
+                    value={count}
+                    total={report.conversations.total}
+                  />
+                ))}
+            </div>
+          </Card>
+        )}
+
+        {/* Why people are escalating, not just how many — the "Waiting for a human" stat and the
+            Needs Attention card above say something is waiting, this says what to expect once the
+            queue is open. */}
+        {report && Object.keys(report.escalations.byReason).length > 0 && (
+          <Card
+            title="Escalation reasons"
+            actions={
+              <Link to="/escalations" className="small">
+                Queue →
+              </Link>
+            }
+          >
+            <div className="stack" style={{ gap: 10 }}>
+              {Object.entries(report.escalations.byReason)
+                .sort((a, b) => b[1] - a[1])
+                .slice(0, 5)
+                .map(([reason, count]) => (
+                  <CoverageBar key={reason} label={humanise(reason)} value={count} total={report.escalations.total} />
+                ))}
+            </div>
+          </Card>
+        )}
+
         {canSeeAudit && (
           <Card title="Recent activity">
             {!activity ? (
@@ -377,6 +458,95 @@ export function DashboardPage() {
           )}
         </Card>
       </div>
+
+      {/* --- what the system is learning, what it has sent -------------------------------------- */}
+      {canSeeReports && (
+        <div className="dash-cols-even">
+          <Card
+            title="Pattern detection"
+            actions={
+              <Link to="/automation/candidates" className="small">
+                Review →
+              </Link>
+            }
+          >
+            {!patterns ? (
+              <Loading label="Checking…" />
+            ) : patterns.summary.total === 0 ? (
+              <Empty
+                title="No patterns detected yet"
+                hint="Repeated questions the detector notices across groups appear here."
+                icon={<IconLightbulb size={20} />}
+              />
+            ) : (
+              <div className="stack" style={{ gap: 10 }}>
+                <div className="rowlist">
+                  <div className="rowlist-item">
+                    <span className="rowlist-chip tone-accent">{patterns.summary.total}</span>
+                    <div className="rowlist-body">
+                      <div className="rowlist-text">Detected</div>
+                      <div className="rowlist-sub">{patterns.summary.groupsContributing} groups contributing</div>
+                    </div>
+                  </div>
+                  <div className="rowlist-item">
+                    <span className="rowlist-chip tone-warn">{patterns.summary.pending}</span>
+                    <div className="rowlist-body">
+                      <div className="rowlist-text">Pending review</div>
+                    </div>
+                  </div>
+                  <div className="rowlist-item">
+                    <span className="rowlist-chip tone-ok">{patterns.summary.published}</span>
+                    <div className="rowlist-body">
+                      <div className="rowlist-text">Published as rules</div>
+                    </div>
+                  </div>
+                </div>
+                {patterns.items[0] && (
+                  <p className="muted small">
+                    Most repeated: <strong>{patterns.items[0].title}</strong> ({patterns.items[0].occurrences}×)
+                  </p>
+                )}
+              </div>
+            )}
+          </Card>
+
+          <Card
+            title="Recent broadcasts"
+            actions={
+              <Link to="/broadcasts" className="small">
+                All →
+              </Link>
+            }
+          >
+            {!broadcastRows ? (
+              <Loading label="Loading…" />
+            ) : broadcastRows.length === 0 ? (
+              <Empty
+                title="No broadcasts sent yet"
+                hint="Campaign outcomes appear here once one goes out."
+                icon={<IconMegaphone size={20} />}
+              />
+            ) : (
+              <div className="rowlist">
+                {broadcastRows.map((row) => (
+                  <div key={row.id} className="rowlist-item">
+                    <div className="rowlist-body">
+                      <div className="rowlist-text">{row.name}</div>
+                      <div className="rowlist-sub">
+                        {row.sent.toLocaleString()} sent
+                        {row.successRate !== null && ` · ${Math.round(row.successRate * 100)}% success`}
+                      </div>
+                    </div>
+                    <Badge tone={row.status === 'COMPLETED' ? 'ok' : row.status === 'FAILED' ? 'bad' : 'busy'}>
+                      {humanise(row.status)}
+                    </Badge>
+                  </div>
+                ))}
+              </div>
+            )}
+          </Card>
+        </div>
+      )}
     </>
   );
 }

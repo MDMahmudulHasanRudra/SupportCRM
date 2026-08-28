@@ -11,6 +11,7 @@ import {
 import {
   Badge,
   Card,
+  CoverageBar,
   Empty,
   ErrorState,
   Loading,
@@ -326,32 +327,6 @@ function Versus({
     </div>
   );
 }
-
-/**
- * A proportion bar.
- *
- * Shows the count and the total beside the percentage: "64%" of an unknown denominator is not a
- * fact an operator can act on, and 64% of 9 groups reads very differently from 64% of 3,000.
- */
-function CoverageBar({ label, value, total }: { label: string; value: number; total: number }) {
-  // Zero groups is a real state, not a division to guess at.
-  const percent = total === 0 ? 0 : Math.round((value / total) * 100);
-
-  return (
-    <div className="coverage">
-      <div className="coverage-head">
-        <span>{label}</span>
-        <span className="muted small">
-          {value.toLocaleString()} of {total.toLocaleString()} · {percent}%
-        </span>
-      </div>
-      <div className="coverage-track">
-        <div className="coverage-fill" style={{ width: `${percent}%` }} />
-      </div>
-    </div>
-  );
-}
-
 
 /**
  * Whether AI is actually doing anything, and if not, why.
