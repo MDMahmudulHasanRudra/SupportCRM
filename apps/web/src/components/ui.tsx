@@ -119,9 +119,20 @@ export function Loading({ label = 'Loading…' }: { label?: string }) {
  * Takes a sentence explaining *why* it is empty and what to do, not the word "None". An empty
  * screen with no explanation is the most common way a working feature looks broken.
  */
-export function Empty({ title, hint, action }: { title: string; hint?: string; action?: ReactNode }) {
+export function Empty({
+  title,
+  hint,
+  action,
+  icon,
+}: {
+  title: string;
+  hint?: string;
+  action?: ReactNode;
+  icon?: ReactNode;
+}) {
   return (
     <div className="empty">
+      {icon && <div className="empty-icon" aria-hidden="true">{icon}</div>}
       <h2>{title}</h2>
       {hint && <p className="muted">{hint}</p>}
       {action && <div className="row" style={{ justifyContent: 'center', marginTop: 12 }}>{action}</div>}
@@ -130,15 +141,39 @@ export function Empty({ title, hint, action }: { title: string; hint?: string; a
 }
 
 /** A failure, with a way out of it. A dead end is worse than an error. */
-export function ErrorState({ message, onRetry }: { message: string; onRetry?: () => void }) {
+export function ErrorState({
+  message,
+  onRetry,
+  icon,
+}: {
+  message: string;
+  onRetry?: () => void;
+  icon?: ReactNode;
+}) {
   return (
-    <div className="alert">
-      <div>{message}</div>
+    <div className="error-state">
+      {icon && <div className="error-state-icon" aria-hidden="true">{icon}</div>}
+      <p>{message}</p>
       {onRetry && (
-        <button type="button" className="link" onClick={onRetry} style={{ padding: 0, marginTop: 6 }}>
+        <button type="button" className="link" onClick={onRetry} style={{ padding: 0 }}>
           Try again
         </button>
       )}
+    </div>
+  );
+}
+
+/**
+ * Pulsing placeholder bars for a list that's still loading — for the busiest lists only (the
+ * conversations inbox, the groups table, the customers list), not a blanket replacement for
+ * `Loading`: most panels are small enough that a spinner reads faster than a fake shape of one.
+ */
+export function Skeleton({ lines = 3, height }: { lines?: number; height?: number }) {
+  return (
+    <div className="skeleton" aria-hidden="true">
+      {Array.from({ length: lines }, (_, index) => (
+        <div key={index} className="skeleton-line" style={height ? { height } : undefined} />
+      ))}
     </div>
   );
 }
