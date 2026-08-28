@@ -13,6 +13,7 @@ import { GroupOnboardingService } from './group-onboarding.service';
 import { GroupSyncService } from './group-sync.service';
 import { GroupOperationsService } from './group-operations.service';
 import { GroupAiStatusService } from './group-ai-status.service';
+import { GroupStatsService } from './group-stats.service';
 import { AutomationProfile } from '../automation/entities/automation-profile.entity';
 import { ChannelAccount } from '../channel/entities/channel-account.entity';
 import { SettingsModule } from '../settings/settings.module';
@@ -43,7 +44,7 @@ const isWorker = process.env.RUN_MODE === 'worker';
   // "onboarding-rules" and then fails as an invalid UUID. Nest resolves routes in registration
   // order, so the specific controller is registered first.
   controllers: [GroupOnboardingController, GroupsController],
-  providers: [GroupSyncService, GroupOperationsService, GroupAiStatusService, GroupOnboardingService, ...(isWorker ? [ParticipantSyncHandler] : [])],
-  exports: [GroupSyncService, GroupOperationsService, GroupAiStatusService, GroupOnboardingService, TypeOrmModule],
+  providers: [GroupSyncService, GroupOperationsService, GroupAiStatusService, GroupStatsService, GroupOnboardingService, ...(isWorker ? [ParticipantSyncHandler] : [])],
+  exports: [GroupSyncService, GroupOperationsService, GroupAiStatusService, GroupStatsService, GroupOnboardingService, TypeOrmModule],
 })
 export class GroupsModule {}

@@ -2,17 +2,7 @@ import { Body, Controller, Get, NotFoundException, Param, Post, Query, Req } fro
 import { InjectRepository } from '@nestjs/typeorm';
 import { ApiOperation, ApiTags } from '@nestjs/swagger';
 import { Type } from 'class-transformer';
-import {
-  IsEnum,
-  IsInt,
-  IsOptional,
-  IsString,
-  IsUUID,
-  Max,
-  MaxLength,
-  Min,
-  MinLength,
-} from 'class-validator';
+import { IsEnum, IsISO8601, IsInt, IsOptional, IsString, IsUUID, Max, MaxLength, Min, MinLength } from 'class-validator';
 import type { Request } from 'express';
 import { Repository } from 'typeorm';
 import { AuditService } from '../audit/audit.service';
@@ -46,6 +36,17 @@ export class ListMessagesDto {
   @IsOptional() @IsUUID() groupId?: string;
   @IsOptional() @IsEnum(MessageDirection) direction?: MessageDirection;
   @IsOptional() @IsEnum(MessageClassification) classification?: MessageClassification;
+  /**
+   * One sender, by their stable provider id.
+   *
+   * Not by display name: a WhatsApp display name is whatever the sender last set it to, so
+   * filtering on it silently loses everything they sent before they changed it.
+   */
+  @IsOptional() @IsString() @MaxLength(190) senderExternalId?: string;
+  /** Messages sent on or after this instant. */
+  @IsOptional() @IsISO8601() sentAfter?: string;
+  /** Messages sent strictly before this instant. */
+  @IsOptional() @IsISO8601() sentBefore?: string;
   @IsOptional() @IsString() @MaxLength(120) search?: string;
   @IsOptional() @Type(() => Number) @IsInt() @Min(1) @Max(100) limit?: number;
   @IsOptional() @Type(() => Number) @IsInt() @Min(0) offset?: number;
@@ -95,6 +96,13 @@ export class MessagesController {
     if (query.groupId) qb.andWhere('m.groupId = :g', { g: query.groupId });
     if (query.direction) qb.andWhere('m.direction = :d', { d: query.direction });
     if (query.classification) qb.andWhere('m.classification = :cl', { cl: query.classification });
+    if (query.senderExternalId) {
+      qb.andWhere('m.senderExternalId = :sender', { sender: query.senderExternalId });
+    }
+    // Half-open, as everywhere else: `>= from AND < to`, so a day range covers the whole day and
+    // a message dated in the future cannot leak into a bounded window.
+    if (query.sentAfter) qb.andWhere('m.sentAt >= :after', { after: new Date(query.sentAfter) });
+    if (query.sentBefore) qb.andWhere('m.sentAt < :before', { before: new Date(query.sentBefore) });
     if (query.search) {
       // Uses the GIN full-text index. `plainto_tsquery` rather than `to_tsquery` because the input
       // is untrusted and the latter would let a user inject query operators.

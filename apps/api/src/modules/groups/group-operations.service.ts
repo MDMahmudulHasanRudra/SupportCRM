@@ -28,7 +28,10 @@ export type GroupSort =
   | 'lastActivity'
   | 'messagesToday'
   | 'aiRepliesToday'
-  | 'humanSupportToday';
+  | 'humanSupportToday'
+  | 'messagesThisMonth'
+  | 'aiRepliesThisMonth'
+  | 'humanSupportThisMonth';
 
 export interface GroupListFilter {
   channelAccountId?: string;
@@ -38,6 +41,10 @@ export interface GroupListFilter {
   automationEnabled?: boolean;
   patternAnalysisEnabled?: boolean;
   knowledgeContributionEnabled?: boolean;
+  /** Groups that have ever received an AI reply. */
+  hasAiActivity?: boolean;
+  /** Groups a registered support member has ever replied in. */
+  hasSupportActivity?: boolean;
   isActive?: boolean;
   /**
    * Which knowledge profile the group answers from. The literal `'none'` selects groups with no
@@ -79,6 +86,27 @@ export interface GroupRow {
   messagesToday: number;
   aiRepliesToday: number;
   humanSupportToday: number;
+  /**
+   * The same three since the first of the month.
+   *
+   * Free, given how today is computed: the aggregate already has to open a window, so it opens it
+   * at the start of the month and separates today with a FILTER. One scan, two windows. Widening
+   * it further — to all time — is what reintroduces the unbounded per-group scan this design
+   * exists to avoid.
+   */
+  messagesThisMonth: number;
+  aiRepliesThisMonth: number;
+  humanSupportThisMonth: number;
+  /** When the group row was first synced. */
+  createdAt: string | null;
+  /**
+   * When AI and a support member last acted here.
+   *
+   * All-time maxima, so unlike the counters above they cannot be bounded to one day. They are
+   * therefore computed for the page's rows only — see `lastActivityFor`.
+   */
+  lastAiActivityAt: string | null;
+  lastSupportActivityAt: string | null;
 }
 
 @Injectable()
@@ -111,6 +139,27 @@ export class GroupOperationsService {
       add('g."knowledgeContributionEnabled" = ?', filter.knowledgeContributionEnabled);
     }
     if (filter.isActive !== undefined) add('g."isActive" = ?', filter.isActive);
+    /*
+     * Activity filters use EXISTS rather than a join or a counter comparison.
+     *
+     * EXISTS stops at the first matching row, so "has this group ever seen an AI reply" costs one
+     * index probe instead of counting every message the group has ever received. A join would also
+     * multiply the group rows and need a DISTINCT to undo it.
+     */
+    if (filter.hasAiActivity !== undefined) {
+      clauses.push(
+        `${filter.hasAiActivity ? '' : 'NOT '}EXISTS (
+           SELECT 1 FROM messages am
+           WHERE am."groupId" = g.id AND am.classification = 'BOT_MESSAGE')`,
+      );
+    }
+    if (filter.hasSupportActivity !== undefined) {
+      clauses.push(
+        `${filter.hasSupportActivity ? '' : 'NOT '}EXISTS (
+           SELECT 1 FROM messages sm
+           WHERE sm."groupId" = g.id AND sm.classification = 'TEAM_MESSAGE')`,
+      );
+    }
     if (filter.knowledgeProfileId) {
       // "No profile" is a real selection an operator makes, so it gets an explicit sentinel rather
       // than being conflated with "do not filter".
@@ -145,6 +194,9 @@ export class GroupOperationsService {
       messagesToday: 'COALESCE(t.messages_today, 0)',
       aiRepliesToday: 'COALESCE(t.ai_replies_today, 0)',
       humanSupportToday: 'COALESCE(t.human_support_today, 0)',
+      messagesThisMonth: 'COALESCE(t.messages_month, 0)',
+      aiRepliesThisMonth: 'COALESCE(t.ai_replies_month, 0)',
+      humanSupportThisMonth: 'COALESCE(t.human_support_month, 0)',
     };
     const column = columns[sort] ?? columns.lastActivity;
     // NULLS LAST in both directions: a group that has never been active belongs at the bottom of
@@ -176,19 +228,27 @@ export class GroupOperationsService {
     // An upper bound as well as a lower one. `>= midnight` alone counts messages dated in the
     // future, which WhatsApp produces whenever a sending device's clock is ahead.
     const tomorrowParam = `$${params.length + 2}`;
+    // The aggregate's lower bound. Today is carved out of it with a FILTER rather than a second
+    // scan, so the monthly figures cost nothing beyond a wider window.
+    const monthParam = `$${params.length + 3}`;
 
     const rows = await this.groups.manager.query<
       Array<Record<string, string | number | boolean | null>>
     >(
       `
-      WITH today AS (
+      WITH recent AS (
         SELECT
           m."groupId",
-          COUNT(*)                                                    AS messages_today,
-          COUNT(*) FILTER (WHERE m.classification = 'BOT_MESSAGE')    AS ai_replies_today,
-          COUNT(*) FILTER (WHERE m.classification = 'TEAM_MESSAGE')   AS human_support_today
+          COUNT(*) FILTER (WHERE m."sentAt" >= ${todayParam})                                AS messages_today,
+          COUNT(*) FILTER (WHERE m."sentAt" >= ${todayParam}
+                             AND m.classification = 'BOT_MESSAGE')                           AS ai_replies_today,
+          COUNT(*) FILTER (WHERE m."sentAt" >= ${todayParam}
+                             AND m.classification = 'TEAM_MESSAGE')                          AS human_support_today,
+          COUNT(*)                                                                           AS messages_month,
+          COUNT(*) FILTER (WHERE m.classification = 'BOT_MESSAGE')                           AS ai_replies_month,
+          COUNT(*) FILTER (WHERE m.classification = 'TEAM_MESSAGE')                          AS human_support_month
         FROM messages m
-        WHERE m."sentAt" >= ${todayParam}
+        WHERE m."sentAt" >= ${monthParam}
           AND m."sentAt" <  ${tomorrowParam}
           AND m."groupId" IS NOT NULL
         GROUP BY m."groupId"
@@ -197,23 +257,28 @@ export class GroupOperationsService {
         g.id, g."externalId", g."channelAccountId", g.name, g."participantCount",
         g."isActive", g."monitoringState", g."aiEnabled", g."automationEnabled",
         g."patternAnalysisEnabled", g."knowledgeContributionEnabled",
-        g."knowledgeProfileId", g."lastMessageAt",
-        COALESCE(t.messages_today, 0)       AS messages_today,
-        COALESCE(t.ai_replies_today, 0)     AS ai_replies_today,
-        COALESCE(t.human_support_today, 0)  AS human_support_today
+        g."knowledgeProfileId", g."lastMessageAt", g."createdAt",
+        COALESCE(t.messages_today, 0)        AS messages_today,
+        COALESCE(t.ai_replies_today, 0)      AS ai_replies_today,
+        COALESCE(t.human_support_today, 0)   AS human_support_today,
+        COALESCE(t.messages_month, 0)        AS messages_month,
+        COALESCE(t.ai_replies_month, 0)      AS ai_replies_month,
+        COALESCE(t.human_support_month, 0)   AS human_support_month
       FROM groups g
-      LEFT JOIN today t ON t."groupId" = g.id
+      LEFT JOIN recent t ON t."groupId" = g.id
       ${whereSql}
       ${this.orderBy(options.sort, options.direction)}
-      LIMIT $${params.length + 3} OFFSET $${params.length + 4}
+      LIMIT $${params.length + 4} OFFSET $${params.length + 5}
       `,
-      [...params, startOfToday(), startOfTomorrow(), options.limit, options.offset],
+      [...params, startOfToday(), startOfTomorrow(), startOfMonth(), options.limit, options.offset],
     );
 
     const [{ count }] = await this.groups.manager.query<Array<{ count: string }>>(
       `SELECT COUNT(*) AS count FROM groups g ${whereSql}`,
       params,
     );
+
+    const lastActivity = await this.lastActivityFor(rows.map((row) => String(row.id)));
 
     return {
       items: rows.map((row) => ({
@@ -233,6 +298,12 @@ export class GroupOperationsService {
         messagesToday: Number(row.messages_today),
         aiRepliesToday: Number(row.ai_replies_today),
         humanSupportToday: Number(row.human_support_today),
+        messagesThisMonth: Number(row.messages_month),
+        aiRepliesThisMonth: Number(row.ai_replies_month),
+        humanSupportThisMonth: Number(row.human_support_month),
+        createdAt: row.createdAt === null ? null : new Date(String(row.createdAt)).toISOString(),
+        lastAiActivityAt: lastActivity.get(String(row.id))?.ai ?? null,
+        lastSupportActivityAt: lastActivity.get(String(row.id))?.support ?? null,
       })),
       total: Number(count),
       limit: options.limit,
@@ -247,6 +318,47 @@ export class GroupOperationsService {
    * needs. Shipping full rows for several thousand groups to build a selection would be a large
    * payload nobody reads.
    */
+
+  /**
+   * When AI and a support member last acted, for one page of groups.
+   *
+   * Deliberately a second query over the page's ids rather than a column in the main statement.
+   * "Last AI reply" is an all-time maximum, and computing it inside the list would mean aggregating
+   * every message each matching group has ever received — the per-group-lateral shape that measured
+   * 191ms for one page across 3,000 groups and grew with total history.
+   *
+   * Bounded to at most one page of ids, it is a handful of index probes: the
+   * `(groupId, classification, sentAt DESC)` index answers each maximum from its first entry
+   * without touching the rows. Two queries, never N+1.
+   */
+  private async lastActivityFor(
+    groupIds: string[],
+  ): Promise<Map<string, { ai: string | null; support: string | null }>> {
+    const result = new Map<string, { ai: string | null; support: string | null }>();
+    if (groupIds.length === 0) return result;
+
+    const rows = await this.groups.manager.query<Array<Record<string, string | null>>>(
+      `
+      SELECT
+        m."groupId"                                                        AS group_id,
+        MAX(m."sentAt") FILTER (WHERE m.classification = 'BOT_MESSAGE')    AS ai_at,
+        MAX(m."sentAt") FILTER (WHERE m.classification = 'TEAM_MESSAGE')   AS support_at
+      FROM messages m
+      WHERE m."groupId" = ANY($1::uuid[])
+      GROUP BY m."groupId"
+      `,
+      [groupIds],
+    );
+
+    for (const row of rows) {
+      result.set(String(row.group_id), {
+        ai: row.ai_at === null ? null : new Date(String(row.ai_at)).toISOString(),
+        support: row.support_at === null ? null : new Date(String(row.support_at)).toISOString(),
+      });
+    }
+    return result;
+  }
+
   async idsMatching(filter: GroupListFilter, cap: number): Promise<string[]> {
     const { sql: whereSql, params } = this.where(filter);
     const rows = await this.groups.manager.query<Array<{ id: string }>>(
@@ -269,6 +381,9 @@ export class GroupOperationsService {
     aiMonitored: number;
     aiDisabled: number;
     collecting: number;
+    /** Counted directly: a group may be PENDING or IGNORED, not merely "not MONITORED". */
+    notCollecting: number;
+    automationEnabled: number;
     patternAnalysis: number;
     activeToday: number;
     aiSupportedToday: number;
@@ -281,6 +396,10 @@ export class GroupOperationsService {
         (SELECT COUNT(*) FROM groups WHERE "aiEnabled" = true)                 AS ai_monitored,
         (SELECT COUNT(*) FROM groups WHERE "aiEnabled" = false)                AS ai_disabled,
         (SELECT COUNT(*) FROM groups WHERE "monitoringState" = 'MONITORED')    AS collecting,
+        -- Counted, not derived as total - collecting. A group can be PENDING or IGNORED as well as
+        -- MONITORED, so subtraction would quietly fold two different states into one number.
+        (SELECT COUNT(*) FROM groups WHERE "monitoringState" <> 'MONITORED')    AS not_collecting,
+        (SELECT COUNT(*) FROM groups WHERE "automationEnabled" = true)          AS automation_enabled,
         (SELECT COUNT(*) FROM groups WHERE "patternAnalysisEnabled" = true)    AS pattern_analysis,
         (SELECT COUNT(*) FROM groups WHERE "lastMessageAt" >= $1)              AS active_today,
         -- Unique groups, not message counts: a group the AI answered twenty times is one supported
@@ -300,6 +419,8 @@ export class GroupOperationsService {
       aiMonitored: Number(row.ai_monitored),
       aiDisabled: Number(row.ai_disabled),
       collecting: Number(row.collecting),
+      notCollecting: Number(row.not_collecting),
+      automationEnabled: Number(row.automation_enabled),
       patternAnalysis: Number(row.pattern_analysis),
       activeToday: Number(row.active_today),
       aiSupportedToday: Number(row.ai_supported_today),
@@ -318,6 +439,12 @@ export class GroupOperationsService {
 function startOfToday(): Date {
   const now = new Date();
   return new Date(now.getFullYear(), now.getMonth(), now.getDate());
+}
+
+/** The first instant of the current month, in the application's zone. */
+function startOfMonth(): Date {
+  const now = new Date();
+  return new Date(now.getFullYear(), now.getMonth(), 1);
 }
 
 /** The exclusive upper bound of today, in the same zone. */

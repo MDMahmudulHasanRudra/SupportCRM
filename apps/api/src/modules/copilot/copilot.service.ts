@@ -9,6 +9,11 @@ import { AutomationCandidate, CandidateStatus } from '../automation/entities/aut
 import { Group } from '../groups/entities/group.entity';
 import { Escalation, EscalationStatus } from '../escalation/entities/escalation.entity';
 import { AIGatewayService } from '../ai/ai-gateway.service';
+import { AIRegistryService } from '../ai/ai-registry.service';
+import { ActivityAnalyticsService } from '../reports/activity-analytics.service';
+import { KnowledgeCandidateService } from '../knowledge/knowledge-candidate.service';
+import { TeamIdentityService } from '../team/team-identity.service';
+import { ChannelKey } from '../channel/entities/channel.entity';
 import { ReportsService, defaultWindow } from '../reports/reports.service';
 import { CopilotAction, CopilotActionStatus } from './entities/copilot-action.entity';
 import { COPILOT_TOOLS, findTool, validateArguments, type CopilotTool } from './copilot-tools';
@@ -47,7 +52,11 @@ export class CopilotService {
     @InjectRepository(Group) private readonly groups: Repository<Group>,
     @InjectRepository(Escalation) private readonly escalations: Repository<Escalation>,
     private readonly reports: ReportsService,
+    private readonly activity: ActivityAnalyticsService,
+    private readonly knowledgeCandidates: KnowledgeCandidateService,
+    private readonly identities: TeamIdentityService,
     private readonly ai: AIGatewayService,
+    private readonly registry: AIRegistryService,
     private readonly metrics: MetricsService,
   ) {}
 
@@ -206,34 +215,87 @@ export class CopilotService {
       .join('\n');
 
     let chosen: { tool?: unknown; arguments?: unknown } | null = null;
+    /** Kept so a failure to map can be logged with what the model actually said. */
+    let raw: string | null = null;
+    /**
+     * Set when the provider itself failed rather than the model declining.
+     *
+     * The two look identical from here — no tool either way — but they are completely different
+     * problems: one is "rephrase your question", the other is "the provider is rate-limited and
+     * nothing you type will work". Reporting the second as the first sends an operator off
+     * rewording a perfectly good question.
+     */
+    let providerFailure: string | null = null;
     try {
-      const { result } = await this.ai.decide({
-        question,
-        history: [],
-        // The tool catalogue is passed as knowledge, which means the same no-invention rules apply
-        // to it: answer only from what is supplied, escalate rather than guess.
-        knowledge: [{ id: 'tools', title: 'Available tools', content: catalogue }],
-        guidance:
-          'You are choosing ONE tool from the list to answer the administrator. Reply with JSON ' +
-          'whose "answer" field is itself JSON of the form {"tool":"<name>","arguments":{...}}. ' +
-          'Use only a tool from the list and only its declared arguments. If none fits, set ' +
-          'decision to ESCALATE.',
-      });
+      /*
+       * The registry directly, with a system prompt written for this job.
+       *
+       * `AIGatewayService.decide` builds the customer-support persona: "You are a customer support
+       * assistant for an internet service provider. You answer ONLY from the approved knowledge...
+       * escalate rather than guess." Handed an admin question and a tool catalogue as "knowledge",
+       * a model following that prompt correctly concludes it cannot answer, and escalates. Two
+       * different models did exactly that, returning ESCALATE with no answer and no reason — they
+       * were obeying the instructions, which were the wrong instructions.
+       *
+       * Routing an operator's request to a tool is not customer support, so it does not borrow the
+       * customer-support prompt. The safety argument is unchanged and lives where it always did:
+       * `invoke` accepts nothing outside the registry and re-checks the caller's permission.
+       */
+      const { result } = await this.registry.decide(
+        {
+          question,
+          history: [],
+          knowledge: [{ id: 'tools', title: 'Available tools', content: catalogue }],
+        },
+        { system: TOOL_ROUTER_SYSTEM, temperature: 0 },
+      );
 
-      if (result.decision === 'ANSWER' && result.answer) {
-        chosen = JSON.parse(result.answer) as { tool?: unknown; arguments?: unknown };
-      }
+      /*
+       * Both fields, because `decide` is answering a different question than we asked it.
+       *
+       * It is built for customer support: ANSWER when the supplied knowledge covers the question,
+       * ESCALATE when it does not. Given a tool catalogue as "knowledge" it often escalates on
+       * perfectly answerable questions — while naming the right tool in its reason. Reading both
+       * recovers those. The registry and the permission check still gate what actually runs, so a
+       * tool name recovered from prose is no less safe than one parsed from JSON.
+       */
+      raw = [result.answer, result.reason].filter(Boolean).join('\n') || null;
+      if (result.answer) chosen = parseToolChoice(result.answer);
     } catch (error) {
-      this.logger.warn('The Copilot could not interpret a question', {
-        error: (error as Error).message,
-      });
+      providerFailure = (error as Error).message;
+      this.logger.warn('The Copilot could not interpret a question', { error: providerFailure });
     }
 
-    const toolName = typeof chosen?.tool === 'string' ? chosen.tool : null;
+    let toolName = typeof chosen?.tool === 'string' ? chosen.tool : null;
+
+    /*
+     * Last resort: find a tool the model *named* without wrapping it correctly.
+     *
+     * Smaller and free-tier models frequently answer the question in prose while mentioning the
+     * right tool, or return the JSON fenced, or ignore the envelope entirely. Refusing those is
+     * pedantry — the safety of this path does not come from the model's formatting. It comes from
+     * `invoke`, which accepts nothing outside the registry and re-checks the caller's permission
+     * whatever the model said. So it is safe to read a tool name out of the text, and unhelpful
+     * not to.
+     */
+    if ((!toolName || !findTool(toolName)) && raw) {
+      toolName = available.find((tool) => raw!.includes(tool.name))?.name ?? null;
+    }
+
     if (!toolName || !findTool(toolName)) {
+      // Logged with what the model actually said. Without this the operator sees "I could not match
+      // that" and has no way to tell a bad question from a model that cannot follow the format.
+      this.logger.warn('The Copilot could not map an answer onto a tool', {
+        question: question.slice(0, 200),
+        modelAnswer: raw ? raw.slice(0, 400) : null,
+      });
+
       return {
         answered: false,
-        message: 'I could not match that to a tool I have. These are the ones available to you.',
+        message: providerFailure
+          ? `The AI provider did not answer, so I could not interpret that: ${providerFailure} ` +
+            'Your question was fine — you can run a tool directly in the meantime.'
+          : 'I could not match that to a tool I have. These are the ones available to you.',
         suggestions: available.map((tool) => ({ name: tool.name, description: tool.description })),
       };
     }
@@ -293,6 +355,35 @@ export class CopilotService {
         });
         return { total, items: items.map((row) => ({ id: row.id, reason: row.reason, since: row.createdAt })) };
       }
+      case 'ai_activity':
+        return {
+          items: await this.activity.aiActivity({
+            bucket: args.bucket === 'month' ? 'month' : 'day',
+            periods: Number(args.periods ?? 14),
+            channelAccountId: args.channelAccountId ? String(args.channelAccountId) : undefined,
+          }),
+          note: 'messages counts replies; uniqueGroups counts distinct groups. They are not the same figure.',
+        };
+      case 'support_activity':
+        return {
+          items: await this.activity.supportActivity({
+            bucket: args.bucket === 'month' ? 'month' : 'day',
+            periods: Number(args.periods ?? 14),
+            channelAccountId: args.channelAccountId ? String(args.channelAccountId) : undefined,
+          }),
+          note: 'Only messages from registered support members are counted.',
+        };
+      case 'why_ai_blocked': {
+        const days = Number(args.periods ?? 30);
+        const now = new Date();
+        const to = new Date(now.getFullYear(), now.getMonth(), now.getDate() + 1);
+        return {
+          items: await this.activity.aiBlocks({ from: new Date(to.getTime() - days * 86_400_000), to }),
+          note: 'Recorded decisions from the engine, not estimates.',
+        };
+      }
+      case 'pattern_summary':
+        return this.activity.patternSummary();
       default:
         throw new BadRequestException(`${tool.name} is not a read tool.`);
     }
@@ -338,6 +429,47 @@ export class CopilotService {
         });
         return { affected: result.affected ?? 0 };
       }
+      case 'add_knowledge': {
+        // A candidate, not an article. It cannot answer anybody until a person converts it, which
+        // is the same gate every other route into the knowledge base goes through.
+        const candidate = await this.knowledgeCandidates.create(
+          { question: String(args.question), context: args.context ? String(args.context) : null },
+          user.id,
+        );
+        return {
+          candidateId: candidate.id,
+          status: candidate.status,
+          note: 'Queued for review. It is not knowledge the AI can use until somebody converts it.',
+        };
+      }
+      case 'add_support_member': {
+        const identity = await this.identities.create(
+          {
+            channelKey: ChannelKey.WHATSAPP,
+            phone: String(args.phone),
+            displayName: String(args.displayName),
+            ...(args.jobRole ? { jobRole: String(args.jobRole) } : {}),
+          },
+        );
+        return {
+          identityId: identity.id,
+          displayName: identity.displayName,
+          note: 'Not retroactive — messages already stored keep the classification they arrived with.',
+        };
+      }
+      case 'set_group_ai': {
+        const where: Record<string, unknown> = { isActive: true };
+        if (args.monitoringState) where.monitoringState = args.monitoringState;
+
+        const result = await this.groups.update(where as never, { aiEnabled: Boolean(args.enabled) });
+        // Logged at warn: this is the switch that decides whether machines talk to customers.
+        this.logger.warn('Copilot changed group AI permission', {
+          userId: user.id,
+          affected: result.affected ?? 0,
+          enabled: Boolean(args.enabled),
+        });
+        return { affected: result.affected ?? 0 };
+      }
       default:
         throw new BadRequestException(`${tool.name} is not a write tool.`);
     }
@@ -358,6 +490,29 @@ export class CopilotService {
       return `This turns automation ${args.enabled ? 'ON' : 'OFF'} for ${count} group${count === 1 ? '' : 's'}.`;
     }
 
+    if (tool.name === 'set_group_ai') {
+      const where: Record<string, unknown> = { isActive: true };
+      if (args.monitoringState) where.monitoringState = args.monitoringState;
+
+      const count = await this.groups.count({ where: where as never });
+      return args.enabled
+        ? `This allows AI to reply in ${count} group${count === 1 ? '' : 's'}. Each still has to pass ` +
+            'every other check — the profile, monitoring, the emergency control and a connected session.'
+        : `This stops AI replying in ${count} group${count === 1 ? '' : 's'}. Disabling is absolute: no ` +
+            'AI reply can reach them afterwards, whatever else is enabled. Messages are still collected.';
+    }
+
+    if (tool.name === 'add_knowledge') {
+      return 'This queues a question for review. It cannot answer anybody until somebody converts it.';
+    }
+
+    if (tool.name === 'add_support_member') {
+      return (
+        'This registers a colleague so their future replies count as human support. It does not ' +
+        'reclassify messages already stored.'
+      );
+    }
+
     if (tool.name === 'propose_automation_candidate') {
       return 'This creates a proposal for review. It cannot answer a customer until somebody publishes it.';
     }
@@ -375,3 +530,71 @@ export class CopilotService {
     return defaultWindow();
   }
 }
+
+
+/**
+ * Reads a tool choice out of whatever the model returned.
+ *
+ * The contract asks for `{"tool":..,"arguments":{..}}` in the answer field. Models comply loosely:
+ * some fence it in ```json, some return the object already parsed, some wrap it in prose. Each of
+ * those is the right choice expressed badly, and rejecting them wastes a correct answer.
+ *
+ * Returns null when nothing usable is found — the caller then falls back to naming the tools, which
+ * is more honest than guessing at one.
+ */
+function parseToolChoice(answer: string): { tool?: unknown; arguments?: unknown } | null {
+  const attempt = (text: string) => {
+    try {
+      const parsed = JSON.parse(text) as unknown;
+      return parsed && typeof parsed === 'object' ? (parsed as { tool?: unknown }) : null;
+    } catch {
+      return null;
+    }
+  };
+
+  const direct = attempt(answer.trim());
+  if (direct?.tool) return direct;
+
+  // A fenced block, with or without a language tag.
+  const fenced = /```(?:json)?\s*([\s\S]*?)```/i.exec(answer);
+  if (fenced) {
+    const inner = attempt(fenced[1].trim());
+    if (inner?.tool) return inner;
+  }
+
+  // The first balanced-looking object in a prose reply.
+  const braced = /\{[\s\S]*\}/.exec(answer);
+  if (braced) {
+    const inner = attempt(braced[0]);
+    if (inner?.tool) return inner;
+  }
+
+  return null;
+}
+
+
+/**
+ * The system prompt for routing an operator's request to a tool.
+ *
+ * Deliberately not the customer-support prompt. This model is not talking to a customer, is not
+ * quoting policy, and has no reason to be told about prices or escalation — it is choosing one
+ * name from a list. Telling it otherwise is what made it refuse.
+ *
+ * It is still told to decline rather than guess, because a wrong tool wastes the operator's time
+ * and, for a WRITE tool, puts a change in front of them they did not ask for. Declining is cheap;
+ * the caller falls back to showing the catalogue.
+ */
+const TOOL_ROUTER_SYSTEM = [
+  'You route an administrator request to exactly one tool from a supplied catalogue.',
+  'You are not answering a customer. You are not writing prose.',
+  '',
+  'Set decision to ANSWER. Set answer to a JSON object, encoded as a string, with two keys:',
+  'a tool key holding the tool name, and an arguments key holding an object of its arguments.',
+  '',
+  'Rules:',
+  '- Use a tool name exactly as it appears in the catalogue.',
+  '- Include only arguments the catalogue declares for that tool.',
+  '- Omit any argument the administrator did not supply. Never invent values.',
+  '- If no tool in the catalogue fits, set decision to ESCALATE and give a short reason.',
+  '- Choosing a tool does not run it. A change is shown to the administrator first.',
+].join('\n');

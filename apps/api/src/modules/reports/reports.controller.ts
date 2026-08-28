@@ -1,17 +1,30 @@
 import { BadRequestException, Controller, Get, Header, Param, Query, Res } from '@nestjs/common';
 import { ApiOperation, ApiTags } from '@nestjs/swagger';
-import { IsISO8601, IsOptional } from 'class-validator';
+import { IsISO8601, IsOptional, IsUUID } from 'class-validator';
 import type { Response } from 'express';
 import { RequirePermissions } from '../rbac/permissions.guard';
 import { toCsv } from './csv';
 import { defaultWindow, ReportsService, type DateWindow } from './reports.service';
 import { OperationsAnalyticsService } from './operations-analytics.service';
+import { ActivityAnalyticsService } from './activity-analytics.service';
 import { Type } from 'class-transformer';
 import { IsInt, Max, Min } from 'class-validator';
 
 export class WindowDto {
   @IsOptional() @IsISO8601() from?: string;
   @IsOptional() @IsISO8601() to?: string;
+}
+
+export class PeriodDto {
+  /** How many buckets back. Bounded so one request cannot scan the whole message history. */
+  @IsOptional() @Type(() => Number) @IsInt() @Min(1) @Max(365) periods?: number;
+  /** Restricts every figure to one WhatsApp account. Omit for the whole estate. */
+  @IsOptional() @IsUUID() channelAccountId?: string;
+}
+
+export class PatternQueryDto {
+  @IsOptional() @Type(() => Number) @IsInt() @Min(1) @Max(200) limit?: number;
+  @IsOptional() @IsUUID() channelAccountId?: string;
 }
 
 export class DaysDto {
@@ -35,6 +48,7 @@ export class ReportsController {
   constructor(
     private readonly reports: ReportsService,
     private readonly operations: OperationsAnalyticsService,
+    private readonly activity: ActivityAnalyticsService,
   ) {}
 
   @Get('dashboard')
@@ -69,6 +83,101 @@ export class ReportsController {
   @ApiOperation({ summary: 'How many groups each capability is configured for' })
   async groupCoverage() {
     return this.operations.coverage();
+  }
+
+
+  /*
+   * Activity analytics.
+   *
+   * Deliberately under `/reports` rather than a new `/analytics` namespace: this module is already
+   * the read-only aggregation surface, with its own guard, DTO and pagination conventions, and a
+   * parallel namespace would be the second API style the brief warns against. The daily/monthly
+   * split is a `bucket` in the path so both share one implementation and cannot drift.
+   */
+  @Get('ai/daily')
+  @RequirePermissions('reports.view')
+  @ApiOperation({ summary: 'AI replies, unique groups and conversations per day' })
+  async aiDaily(@Query() query: PeriodDto) {
+    return {
+      items: await this.activity.aiActivity({
+        bucket: 'day',
+        periods: query.periods ?? 30,
+        channelAccountId: query.channelAccountId,
+      }),
+    };
+  }
+
+  @Get('ai/monthly')
+  @RequirePermissions('reports.view')
+  @ApiOperation({ summary: 'AI replies, unique groups and conversations per month' })
+  async aiMonthly(@Query() query: PeriodDto) {
+    return {
+      items: await this.activity.aiActivity({
+        bucket: 'month',
+        periods: query.periods ?? 12,
+        channelAccountId: query.channelAccountId,
+      }),
+    };
+  }
+
+  @Get('support/daily')
+  @RequirePermissions('reports.view')
+  @ApiOperation({ summary: 'Support messages, unique groups and active members per day' })
+  async supportDaily(@Query() query: PeriodDto) {
+    return {
+      items: await this.activity.supportActivity({
+        bucket: 'day',
+        periods: query.periods ?? 30,
+        channelAccountId: query.channelAccountId,
+      }),
+    };
+  }
+
+  @Get('support/monthly')
+  @RequirePermissions('reports.view')
+  @ApiOperation({ summary: 'Support messages, unique groups and active members per month' })
+  async supportMonthly(@Query() query: PeriodDto) {
+    return {
+      items: await this.activity.supportActivity({
+        bucket: 'month',
+        periods: query.periods ?? 12,
+        channelAccountId: query.channelAccountId,
+      }),
+    };
+  }
+
+  /**
+   * Times the engine declined to let AI answer, by reason.
+   *
+   * Recorded decisions, not inferred: every entry is a `decision_logs` row the engine wrote when it
+   * refused. "AI was blocked 40 times because the group has it off" is therefore a fact with rows
+   * behind it.
+   */
+  @Get('ai/blocks')
+  @RequirePermissions('reports.view')
+  @ApiOperation({ summary: 'Recorded reasons AI did not answer' })
+  async aiBlocks(@Query() query: PeriodDto) {
+    const days = query.periods ?? 30;
+    const now = new Date();
+    const to = new Date(now.getFullYear(), now.getMonth(), now.getDate() + 1);
+    const from = new Date(to.getTime() - days * 86_400_000);
+
+    return {
+      from: from.toISOString(),
+      to: to.toISOString(),
+      items: await this.activity.aiBlocks({ from, to, channelAccountId: query.channelAccountId }),
+    };
+  }
+
+  @Get('patterns')
+  @RequirePermissions('reports.view')
+  @ApiOperation({ summary: 'Repeated-question patterns the detector has found, with their groups' })
+  async patterns(@Query() query: PatternQueryDto) {
+    const [summary, items] = await Promise.all([
+      this.activity.patternSummary(),
+      this.activity.patterns({ limit: query.limit, channelAccountId: query.channelAccountId }),
+    ]);
+    return { summary, items };
   }
 
   @Get('activity-trend')

@@ -295,6 +295,9 @@ export const groups = {
    */
   aiStatus: (id: string) => api.get<GroupAiStatus>(`/groups/${id}/ai-status`),
 
+  /** Everything the detail screen shows, in one call. All figures aggregated in SQL. */
+  stats: (id: string) => api.get<GroupStats>(`/groups/${id}/stats`),
+
   /**
    * Changes one group's flags.
    *
@@ -376,6 +379,8 @@ export interface InspectedMessage {
   externalConversationId: string;
   groupId: string | null;
   direction: MessageDirectionValue;
+  /** The sender's stable provider id. Survives display-name changes; the name does not. */
+  senderExternalId: string | null;
   senderPhone: string | null;
   senderDisplayName: string | null;
   contentType: string;
@@ -441,6 +446,119 @@ export const operationsReports = {
   aiVsHuman: (days = 30) => api.get<{ items: AiVsHumanDay[] }>(`/reports/ai-vs-human?days=${days}`),
   coverage: () => api.get<CoverageSummary>('/reports/group-coverage'),
 };
+
+export interface GroupStats {
+  groupId: string;
+  activity: {
+    totalMessages: number;
+    messagesToday: number;
+    messagesThisWeek: number;
+    messagesThisMonth: number;
+    firstMessageAt: string | null;
+    lastMessageAt: string | null;
+  };
+  ai: {
+    replies: number;
+    repliesToday: number;
+    repliesThisMonth: number;
+    lastReplyAt: string | null;
+    /** Recorded decisions where the engine declined — real rows, not inference. */
+    blocks: Array<{ reasonCode: string; events: number; lastAt: string | null }>;
+  };
+  support: {
+    messages: number;
+    messagesToday: number;
+    messagesThisMonth: number;
+    /** Distinct people, not messages. */
+    uniqueMembers: number;
+    lastSupportAt: string | null;
+    members: Array<{ identityId: string; displayName: string; messages: number; lastAt: string | null }>;
+  };
+  patterns: {
+    detected: number;
+    pending: number;
+    lastDetectedAt: string | null;
+    items: Array<{ candidateId: string; title: string; occurrences: number; status: string; detectedAt: string }>;
+  };
+}
+
+/** A point in a daily or monthly series. `messages` and `uniqueGroups` are never interchangeable. */
+export interface ActivityPoint {
+  /** `YYYY-MM-DD` daily, `YYYY-MM` monthly. */
+  bucket: string;
+  messages: number;
+  uniqueGroups: number;
+  conversations: number;
+}
+
+export interface SupportActivityPoint extends ActivityPoint {
+  activeMembers: number;
+}
+
+export interface AiBlockRow {
+  reasonCode: string;
+  outcome: string;
+  events: number;
+  uniqueGroups: number;
+  lastAt: string | null;
+}
+
+export interface PatternRow {
+  candidateId: string;
+  title: string;
+  occurrences: number;
+  status: string;
+  scopeType: string | null;
+  groupId: string | null;
+  groupName: string | null;
+  detectedAt: string;
+}
+
+/**
+ * Activity analytics.
+ *
+ * Under `/reports` rather than a separate `/analytics` namespace — that module is already the
+ * read-only aggregation surface, and a parallel one would be a second API style.
+ *
+ * `channelAccountId` scopes every figure to one WhatsApp account. Omitting it spans the estate;
+ * groups are unique per account, so nothing is ever merged across them either way.
+ */
+export const activityAnalytics = {
+  aiDaily: (periods = 30, channelAccountId?: string) =>
+    api.get<{ items: ActivityPoint[] }>(`/reports/ai/daily?${accountQuery(periods, channelAccountId)}`),
+  aiMonthly: (periods = 12, channelAccountId?: string) =>
+    api.get<{ items: ActivityPoint[] }>(`/reports/ai/monthly?${accountQuery(periods, channelAccountId)}`),
+  supportDaily: (periods = 30, channelAccountId?: string) =>
+    api.get<{ items: SupportActivityPoint[] }>(`/reports/support/daily?${accountQuery(periods, channelAccountId)}`),
+  supportMonthly: (periods = 12, channelAccountId?: string) =>
+    api.get<{ items: SupportActivityPoint[] }>(`/reports/support/monthly?${accountQuery(periods, channelAccountId)}`),
+  aiBlocks: (periods = 30, channelAccountId?: string) =>
+    api.get<{ from: string; to: string; items: AiBlockRow[] }>(
+      `/reports/ai/blocks?${accountQuery(periods, channelAccountId)}`,
+    ),
+  patterns: (limit = 50, channelAccountId?: string) => {
+    const query = new URLSearchParams({ limit: String(limit) });
+    if (channelAccountId) query.set('channelAccountId', channelAccountId);
+    return api.get<{
+      summary: {
+        total: number;
+        pending: number;
+        published: number;
+        rejected: number;
+        groupsWithPatterns: number;
+        groupsContributing: number;
+        lastDetectedAt: string | null;
+      };
+      items: PatternRow[];
+    }>(`/reports/patterns?${query.toString()}`);
+  },
+};
+
+function accountQuery(periods: number, channelAccountId?: string): string {
+  const query = new URLSearchParams({ periods: String(periods) });
+  if (channelAccountId) query.set('channelAccountId', channelAccountId);
+  return query.toString();
+}
 
 // === support members (Phase 2) ====================================================================
 
@@ -1144,6 +1262,14 @@ export interface GroupOperationsRow {
   messagesToday: number;
   aiRepliesToday: number;
   humanSupportToday: number;
+  /** The same three since the first of the month — one scan, two windows. */
+  messagesThisMonth: number;
+  aiRepliesThisMonth: number;
+  humanSupportThisMonth: number;
+  createdAt: string | null;
+  /** All-time maxima, computed for the page's rows only. */
+  lastAiActivityAt: string | null;
+  lastSupportActivityAt: string | null;
 }
 
 export interface GroupOperationsSummary {
@@ -1151,6 +1277,9 @@ export interface GroupOperationsSummary {
   aiMonitored: number;
   aiDisabled: number;
   collecting: number;
+  /** Counted directly — a group may be PENDING or IGNORED, not merely "not MONITORED". */
+  notCollecting: number;
+  automationEnabled: number;
   patternAnalysis: number;
   activeToday: number;
   aiSupportedToday: number;
@@ -1165,6 +1294,10 @@ export interface GroupOperationsFilter {
   automationEnabled?: boolean;
   patternAnalysisEnabled?: boolean;
   knowledgeContributionEnabled?: boolean;
+  /** Groups that have ever received an AI reply. */
+  hasAiActivity?: boolean;
+  /** Groups a registered support member has ever replied in. */
+  hasSupportActivity?: boolean;
   isActive?: boolean;
   /** Groups that received a message since midnight. */
   activeToday?: boolean;
@@ -1186,6 +1319,10 @@ function groupFilterQuery(filter: GroupOperationsFilter): URLSearchParams {
   if (filter.activeToday !== undefined) query.set('activeToday', String(filter.activeToday));
   if (filter.knowledgeContributionEnabled !== undefined) {
     query.set('knowledgeContributionEnabled', String(filter.knowledgeContributionEnabled));
+  }
+  if (filter.hasAiActivity !== undefined) query.set('hasAiActivity', String(filter.hasAiActivity));
+  if (filter.hasSupportActivity !== undefined) {
+    query.set('hasSupportActivity', String(filter.hasSupportActivity));
   }
   if (filter.knowledgeProfileId) query.set('knowledgeProfileId', filter.knowledgeProfileId);
   if (filter.search) query.set('search', filter.search);
@@ -1856,6 +1993,11 @@ export const messages = {
       channelAccountId?: string;
       classification?: MessageClassificationValue;
       direction?: MessageDirectionValue;
+      /** A sender's stable provider id — never their display name, which they can change. */
+      senderExternalId?: string;
+      /** Half-open window: `>= sentAfter AND < sentBefore`. */
+      sentAfter?: string;
+      sentBefore?: string;
       search?: string;
       limit?: number;
       offset?: number;
@@ -1866,6 +2008,9 @@ export const messages = {
     if (params.channelAccountId) query.set('channelAccountId', params.channelAccountId);
     if (params.classification) query.set('classification', params.classification);
     if (params.direction) query.set('direction', params.direction);
+    if (params.senderExternalId) query.set('senderExternalId', params.senderExternalId);
+    if (params.sentAfter) query.set('sentAfter', params.sentAfter);
+    if (params.sentBefore) query.set('sentBefore', params.sentBefore);
     if (params.search) query.set('search', params.search);
     query.set('limit', String(params.limit ?? 50));
     query.set('offset', String(params.offset ?? 0));

@@ -1,7 +1,15 @@
 import { useCallback, useEffect, useState } from 'react';
 import { Link } from 'react-router-dom';
-import { operationsReports, support, type OperationsDashboard, type SupportMemberRow } from '../api/client';
 import {
+  activityAnalytics,
+  operationsReports,
+  support,
+  type AiBlockRow,
+  type OperationsDashboard,
+  type SupportMemberRow,
+} from '../api/client';
+import {
+  Badge,
   Card,
   Empty,
   ErrorState,
@@ -12,6 +20,7 @@ import {
   TableWrap,
   TrendChart,
   errorMessage,
+  humanise,
 } from '../components/ui';
 
 const WINDOWS = [7, 14, 30];
@@ -42,6 +51,7 @@ export function DashboardOperations() {
   const [days, setDays] = useState(14);
   const [data, setData] = useState<OperationsDashboard | null>(null);
   const [members, setMembers] = useState<SupportMemberRow[]>([]);
+  const [aiBlocks, setAiBlocks] = useState<AiBlockRow[]>([]);
   const [loading, setLoading] = useState(true);
   const [failure, setFailure] = useState<string | null>(null);
 
@@ -49,14 +59,16 @@ export function DashboardOperations() {
     setLoading(true);
     setFailure(null);
     try {
-      const [operations, roster] = await Promise.all([
+      const [operations, roster, blocks] = await Promise.all([
         operationsReports.dashboard(days),
         // Best-effort: this needs `team.manage`, which a reports-only user may not have. The rest of
         // the section is still worth showing to them.
         support.members().catch(() => ({ items: [] as SupportMemberRow[] })),
+        activityAnalytics.aiBlocks(days).catch(() => ({ items: [] as AiBlockRow[] })),
       ]);
       setData(operations);
       setMembers(roster.items);
+      setAiBlocks(blocks.items);
     } catch (error) {
       setFailure(errorMessage(error, 'Could not load operations metrics.'));
     } finally {
@@ -92,6 +104,8 @@ export function DashboardOperations() {
           ))}
         </div>
       </div>
+
+      <AiStatus coverage={coverage} blocks={aiBlocks} repliesToday={today.ai.replies} days={window.days} />
 
       <StatGrid>
         <Stat label="Total groups" value={coverage.totalGroups} />
@@ -228,39 +242,60 @@ export function DashboardOperations() {
           )}
         </Card>
 
-        <Card title="Support members">
+        <Card title="Support member leaderboard">
           {members.length === 0 ? (
             <Empty
               title="No support members registered."
               hint="Until a colleague's number is registered, their replies cannot be told apart from a customer's and are not counted as human support."
             />
           ) : (
-            <TableWrap>
-              <table>
-                <thead>
-                  <tr>
-                    <th>Member</th>
-                    <th className="num">Groups today</th>
-                    <th className="num">Replies today</th>
-                    <th>Last reply</th>
-                  </tr>
-                </thead>
-                <tbody>
-                  {members.slice(0, 10).map((member) => (
-                    <tr key={member.id}>
-                      <td>
-                        <Link to={`/support-members/${member.id}`}>{member.displayName}</Link>
-                      </td>
-                      <td className="num">{member.groupsToday}</td>
-                      <td className="num">{member.repliesToday}</td>
-                      <td className="nowrap muted small">
-                        <RelativeTime value={member.lastReplyAt} />
-                      </td>
+            <>
+              <p className="muted small">
+                Ranked by groups helped over 30 days, not by message count — helping eight groups is
+                broader work than sending eight messages into one.
+              </p>
+              <TableWrap>
+                <table>
+                  <thead>
+                    <tr>
+                      <th>Member</th>
+                      <th className="num">Groups 30d</th>
+                      <th className="num">Replies 30d</th>
+                      <th className="num">Today</th>
+                      <th>Last reply</th>
                     </tr>
-                  ))}
-                </tbody>
-              </table>
-            </TableWrap>
+                  </thead>
+                  <tbody>
+                    {[...members]
+                      .sort(
+                        (a, b) =>
+                          b.groups30d - a.groups30d ||
+                          b.replies30d - a.replies30d ||
+                          a.displayName.localeCompare(b.displayName),
+                      )
+                      .slice(0, 10)
+                      .map((member) => (
+                        <tr key={member.id}>
+                          <td>
+                            <Link to={`/support-members/${member.id}`}>{member.displayName}</Link>
+                            {!member.isActive && <div className="muted small">Inactive</div>}
+                          </td>
+                          <td className="num">{member.groups30d}</td>
+                          <td className="num">{member.replies30d}</td>
+                          <td className="num">
+                            {member.groupsToday > 0 || member.repliesToday > 0
+                              ? `${member.groupsToday} / ${member.repliesToday}`
+                              : '—'}
+                          </td>
+                          <td className="nowrap muted small">
+                            <RelativeTime value={member.lastReplyAt} />
+                          </td>
+                        </tr>
+                      ))}
+                  </tbody>
+                </table>
+              </TableWrap>
+            </>
           )}
         </Card>
       </div>
@@ -314,5 +349,62 @@ function CoverageBar({ label, value, total }: { label: string; value: number; to
         <div className="coverage-fill" style={{ width: `${percent}%` }} />
       </div>
     </div>
+  );
+}
+
+
+/**
+ * Whether AI is actually doing anything, and if not, why.
+ *
+ * "AI: ACTIVE" because a service is running is the claim worth avoiding — the process being up says
+ * nothing about whether a single customer can receive a reply. Active here means the estate is
+ * configured for it *and* it has replied today. Anything else is reported as what it is, with the
+ * reason drawn from the engine's own recorded decisions rather than guessed at.
+ *
+ * The blocks are `decision_logs` rows: each one is a time the engine declined and wrote down why.
+ */
+function AiStatus({
+  coverage,
+  blocks,
+  repliesToday,
+  days,
+}: {
+  coverage: { totalGroups: number; aiConfigured: number; aiDisabled: number };
+  blocks: AiBlockRow[];
+  repliesToday: number;
+  days: number;
+}) {
+  const configured = coverage.aiConfigured > 0;
+  const active = configured && repliesToday > 0;
+
+  // The most common recorded reason, which is the one worth naming first.
+  const topBlock = [...blocks].sort((a, b) => b.events - a.events)[0] ?? null;
+
+  const explanation = !configured
+    ? `No group has AI switched on. ${coverage.aiDisabled} of ${coverage.totalGroups} have it off.`
+    : active
+      ? `AI replied ${repliesToday} time${repliesToday === 1 ? '' : 's'} today across the estate.`
+      : `${coverage.aiConfigured} group${coverage.aiConfigured === 1 ? ' has' : 's have'} AI switched on, but it has not replied today.`;
+
+  return (
+    <Card>
+      <div className="row" style={{ gap: 10, alignItems: 'center', flexWrap: 'wrap' }}>
+        <Badge tone={active ? 'ok' : configured ? 'warn' : 'neutral'}>
+          {active ? 'AI active' : configured ? 'AI idle' : 'AI inactive'}
+        </Badge>
+        <span className="small">{explanation}</span>
+      </div>
+
+      {topBlock && (
+        <p className="muted small" style={{ marginTop: 8 }}>
+          Most common reason AI did not answer in the last {days} days:{' '}
+          <strong>{humanise(topBlock.reasonCode)}</strong> ({topBlock.events} time
+          {topBlock.events === 1 ? '' : 's'}
+          {topBlock.uniqueGroups > 0 &&
+            `, across ${topBlock.uniqueGroups} group${topBlock.uniqueGroups === 1 ? '' : 's'}`}
+          ).
+        </p>
+      )}
+    </Card>
   );
 }

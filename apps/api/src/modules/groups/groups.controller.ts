@@ -27,6 +27,7 @@ import { GroupSyncService } from './group-sync.service';
 import type { GroupListFilter } from './group-operations.service';
 import { GroupOperationsService, type GroupSort } from './group-operations.service';
 import { GroupAiStatusService } from './group-ai-status.service';
+import { GroupStatsService } from './group-stats.service';
 import { QueryBoolean } from '../../common/http/query-boolean';
 
 export class ListGroupsDto {
@@ -61,6 +62,8 @@ export class GroupOperationsQueryDto {
   @IsOptional() @QueryBoolean() @IsBoolean() isActive?: boolean;
   @IsOptional() @QueryBoolean() @IsBoolean() activeToday?: boolean;
   @IsOptional() @QueryBoolean() @IsBoolean() knowledgeContributionEnabled?: boolean;
+  @IsOptional() @QueryBoolean() @IsBoolean() hasAiActivity?: boolean;
+  @IsOptional() @QueryBoolean() @IsBoolean() hasSupportActivity?: boolean;
   /** A profile id, or the literal `none` for groups without one. */
   @IsOptional() @IsString() @MaxLength(64) knowledgeProfileId?: string;
   @IsOptional() @IsString() @MaxLength(190) search?: string;
@@ -88,6 +91,7 @@ export class GroupsController {
     private readonly audit: AuditService,
     private readonly operations: GroupOperationsService,
     private readonly aiStatusService: GroupAiStatusService,
+    private readonly statsService: GroupStatsService,
   ) {}
 
   /**
@@ -197,6 +201,20 @@ export class GroupsController {
   @ApiOperation({ summary: 'The effective AI permission for a group, and what is withholding it' })
   async aiStatus(@Param('id') id: string) {
     return this.aiStatusService.forGroup(id);
+  }
+
+  /**
+   * Everything the group detail screen shows, in one call.
+   *
+   * One request rather than one per tab: the tabs describe a single group, and a request each would
+   * repeat the same lookup six times. Every figure is aggregated in SQL and derived from rows that
+   * exist — there is no stored counter to drift.
+   */
+  @Get(':id/stats')
+  @RequirePermissions('groups.read')
+  @ApiOperation({ summary: 'Activity, AI, support and pattern figures for one group' })
+  async stats(@Param('id') id: string) {
+    return this.statsService.forGroup(id);
   }
 
   @Get(':id/participants')
@@ -445,6 +463,9 @@ const ALLOWED_SORTS: string[] = [
   'messagesToday',
   'aiRepliesToday',
   'humanSupportToday',
+  'messagesThisMonth',
+  'aiRepliesThisMonth',
+  'humanSupportThisMonth',
 ];
 
 /** Midnight today, server time. Used only when the caller supplies no boundary of its own. */
@@ -469,6 +490,8 @@ function toFilter(query: GroupOperationsQueryDto): GroupListFilter {
     automationEnabled: query.automationEnabled,
     activeToday: query.activeToday,
     knowledgeContributionEnabled: query.knowledgeContributionEnabled,
+    hasAiActivity: query.hasAiActivity,
+    hasSupportActivity: query.hasSupportActivity,
     knowledgeProfileId: query.knowledgeProfileId,
     patternAnalysisEnabled: query.patternAnalysisEnabled,
     isActive: query.isActive,

@@ -85,6 +85,14 @@ const isWorker = process.env.RUN_MODE === 'worker';
     GroupKnowledgeHarvestService,
     ...(isWorker ? [KnowledgeIndexHandler] : []),
   ],
-  exports: [KnowledgeRetrievalService, GroupKnowledgeHarvestService, TypeOrmModule],
+  // KnowledgeCandidateService is exported so the Copilot can queue a question for review. It is the
+  // candidate service specifically, never the article service: the assistant may propose knowledge,
+  // it may not publish it.
+  exports: [
+    KnowledgeRetrievalService,
+    GroupKnowledgeHarvestService,
+    KnowledgeCandidateService,
+    TypeOrmModule,
+  ],
 })
 export class KnowledgeModule {}

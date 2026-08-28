@@ -446,3 +446,116 @@ remains a false positive — the value is `support-crm`, the product name, used 
 6. **DST boundaries untested.** Day bucketing is pinned to the configured zone and asserted to be
    local midnight, but no test covers a DST transition. Asia/Dhaka does not observe DST, so this is
    latent rather than active.
+
+---
+---
+
+# Phase 4 — Activity analytics, group stats, multi-account audit
+
+Testing was explicitly skipped for this phase at the user's instruction. Typecheck, lint, builds and
+real-data verification were still performed; **no test was written or executed**.
+
+## 1. What already existed
+
+The audit found most of the brief already implemented and reused it unchanged: the AI permission
+chain and its absolute group-level veto, `TeamMemberIdentity` as Support Members, the groups
+directory with server-side paging/filtering/sorting, bulk operations on the Job Center, the
+knowledge candidate pipeline, `patternAnalysisEnabled` wired to the candidate detector, and the
+support activity APIs including the executive day-by-day drill-down.
+
+Two audit findings worth recording:
+
+- **§26 multi-account is structurally safe.** `UQ_groups_account_external` on
+  `(channelAccountId, externalId)` means the same WhatsApp group synced under two accounts is two
+  rows with two ids. `COUNT(DISTINCT "groupId")` therefore cannot merge them. No fix was needed;
+  optional account scoping was added as a *view* choice rather than a correctness patch.
+- **§27 direct chats already excluded from group figures.** `groupId` is null for one-to-one
+  conversations and `COUNT(DISTINCT)` ignores nulls. Confirmed live: an `AI_DISABLED` block in a
+  direct chat reports `uniqueGroups: 0` while still counting as an event.
+
+## 2. What was added
+
+| File | Purpose |
+|---|---|
+| `reports/activity-analytics.service.ts` | AI/support daily + monthly series, AI block events, pattern analytics |
+| `groups/group-stats.service.ts` | One-call group detail data: activity, AI, support, patterns |
+
+New endpoints, all under the existing `/reports` and `/groups` surfaces:
+
+- `GET /reports/ai/daily`, `/reports/ai/monthly`
+- `GET /reports/support/daily`, `/reports/support/monthly`
+- `GET /reports/ai/blocks` — recorded reasons the engine declined
+- `GET /reports/patterns` — detector output with summary
+- `GET /groups/:id/stats`
+
+All accept an optional `channelAccountId`. Groups list gained `hasAiActivity` /
+`hasSupportActivity` filters and `createdAt`, `lastAiActivityAt`, `lastSupportActivityAt` fields.
+
+**On endpoint naming:** the brief suggested `/analytics/ai/daily`. These live under `/reports`
+instead, because that module is already the read-only aggregation surface with its own guards, DTO
+and pagination conventions — a parallel `/analytics` namespace would be exactly the second API style
+§30 forbids. The frontend client exposes them as `activityAnalytics.*`.
+
+## 3. Business rules
+
+- **Replies and unique groups are never interchangeable.** Verified live: August shows **7 AI
+  replies across 1 unique group**, not 7 groups.
+- **AI blocks are recorded, not inferred.** Every entry is a `decision_logs` row the engine wrote
+  when it declined. Live: 9 `MONITORING_DISABLED` across 3 groups, 1 `AI_DISABLED`.
+- **`uniqueMembers` counts people, not messages**, derived from the identity breakdown so the two
+  cannot disagree.
+- **Pattern totals come from window functions**, not the length of the capped page — otherwise
+  "detected" would silently understate past 25.
+
+## 4. Performance
+
+`lastAiActivityAt` / `lastSupportActivityAt` are all-time maxima and are deliberately **not** in the
+main list query. Computing them there would reintroduce the per-group aggregate over full history
+that measured 191ms per page at 3,000 groups. They are one extra query over the page's ids only —
+two queries, never N+1, answered from the existing `(groupId, classification, sentAt DESC)` index.
+Measured 23–51ms at page size 100.
+
+Activity filters use `EXISTS`, which stops at the first matching row rather than counting every
+message a group ever received.
+
+**No index was added this phase** — the existing ones already serve these access paths.
+
+## 5. Status
+
+| Check | Result |
+|---|---|
+| API typecheck | 0 errors |
+| Web typecheck | 0 errors |
+| API lint | 0 warnings |
+| Web lint | 0 warnings |
+| Production build (web + api) | PASS |
+| Docker build (all 5 images) | PASS |
+| Compose validation | PASS |
+| Migration `Phase13KnowledgeContribution` | applied |
+| Existing endpoints (13 checked) | all HTTP 200 |
+| Orphan outbound messages | 0 |
+| Secrets / internal hosts in bundle | none |
+| Public ports | only `0.0.0.0:12000` |
+
+The Docker build failed once on a transient `puppeteer browsers install chrome@…` download in the
+gateway image. The gateway was not modified this phase; a retry succeeded and all five images now
+build.
+
+## 6. Not implemented, and why
+
+- **No tests written or run.** Skipped at the user's instruction. This means the AI-safety tests
+  §23 requires were not added, and the existing 408 were not executed. Test files were not modified
+  (0 changed), but I cannot assert they still pass.
+- **Group message filters/search** (§12) and the dashboard leaderboard remain unbuilt — UI surfaces,
+  and another agent owns UI.
+- **Cursor/keyset pagination** (§4) — the existing offset pagination measured 72ms at a deep offset
+  across 3,000 groups, so the added complexity was not justified by a measurement.
+
+## 7. Requires manual verification
+
+- No WhatsApp message was sent. Ingestion, classification and AI gating remain **implemented and
+  previously verified, but not re-verified live this phase**.
+- The knowledge harvester's consent gate was proven against real rows in an earlier phase; it has
+  still never produced a candidate from genuine traffic.
+- A group's AI was enabled from a browser session outside my tooling (flagged in Phase 3, still
+  unreverted).

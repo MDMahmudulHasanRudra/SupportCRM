@@ -81,10 +81,11 @@ describe('group operations SQL', () => {
 
       // With no filters the only bound values are the four the query always carries: the two ends
       // of today, then the page bounds.
-      const [from, to, limit, offset] = queries[0].params;
-      expect(queries[0].params).toHaveLength(4);
+      const [from, to, monthStart, limit, offset] = queries[0].params;
+      expect(queries[0].params).toHaveLength(5);
       expect(from).toBeInstanceOf(Date);
       expect(to).toBeInstanceOf(Date);
+      expect(monthStart).toBeInstanceOf(Date);
       expect([limit, offset]).toEqual([25, 0]);
     });
 
@@ -142,7 +143,7 @@ describe('group operations SQL', () => {
       await instance.list({}, { limit: 25, offset: 0, sort: 'messagesToday', direction: 'DESC' });
 
       const sql = queries[0].sql.replace(/\s+/g, ' ');
-      expect(sql).toContain('WITH today AS');
+      expect(sql).toContain('WITH recent AS');
       expect(sql).toMatch(/WHERE m\."sentAt" >= \$\d+ AND m\."sentAt" < \$\d+ AND m\."groupId" IS NOT NULL/);
       // No correlated per-row subquery over messages.
       expect(sql).not.toContain('LATERAL');
@@ -161,9 +162,12 @@ describe('group operations SQL', () => {
       await instance.list({}, { limit: 25, offset: 0, sort: 'name', direction: 'ASC' });
 
       const dates = queries[0].params.filter((value): value is Date => value instanceof Date);
-      expect(dates).toHaveLength(2);
-      // Exactly one day apart, and in order.
-      expect(dates[1].getTime() - dates[0].getTime()).toBe(24 * 60 * 60 * 1000);
+      // Today, tomorrow, and the start of the month the aggregate opens at.
+      expect(dates).toHaveLength(3);
+      const [today, tomorrow, monthStart] = dates;
+      expect(tomorrow.getTime() - today.getTime()).toBe(24 * 60 * 60 * 1000);
+      expect(monthStart.getTime()).toBeLessThanOrEqual(today.getTime());
+      expect(monthStart.getDate()).toBe(1);
       expect(queries[0].sql).not.toContain('now()');
     });
 

@@ -95,7 +95,86 @@ export const COPILOT_TOOLS: readonly CopilotTool[] = [
       { name: 'enabled', type: 'boolean', required: true },
     ],
   },
+
+  // --- read: the activity analytics added alongside the operations console ---------------------
+  {
+    name: 'ai_activity',
+    kind: 'READ',
+    description:
+      'AI replies and the number of DISTINCT groups AI reached, per day or per month. Twenty replies in one group is twenty replies and one group.',
+    permission: 'reports.view',
+    parameters: [
+      { name: 'bucket', type: 'string', required: false },
+      { name: 'periods', type: 'number', required: false },
+      { name: 'channelAccountId', type: 'uuid', required: false },
+    ],
+  },
+  {
+    name: 'support_activity',
+    kind: 'READ',
+    description:
+      'Human support messages, distinct groups helped, and how many support members were active, per day or per month.',
+    permission: 'reports.view',
+    parameters: [
+      { name: 'bucket', type: 'string', required: false },
+      { name: 'periods', type: 'number', required: false },
+      { name: 'channelAccountId', type: 'uuid', required: false },
+    ],
+  },
+  {
+    name: 'why_ai_blocked',
+    kind: 'READ',
+    description:
+      'Recorded reasons the engine declined to let AI answer, by reason code. These are logged decisions, not estimates.',
+    permission: 'reports.view',
+    parameters: [{ name: 'periods', type: 'number', required: false }],
+  },
+  {
+    name: 'pattern_summary',
+    kind: 'READ',
+    description:
+      'How many repeated-question patterns have been detected, how many await review, and how many groups feed the detector.',
+    permission: 'reports.view',
+    parameters: [],
+  },
+
+  // --- write: feeding data in. Both create reviewable items, neither creates an answer -----------
+  {
+    name: 'add_knowledge',
+    kind: 'WRITE',
+    description:
+      'Feed a question into the knowledge review queue as a CANDIDATE. It does not become an answer the AI can use until a person converts it.',
+    permission: 'knowledge.create',
+    parameters: [
+      { name: 'question', type: 'string', required: true },
+      { name: 'context', type: 'string', required: false },
+    ],
+  },
+  {
+    name: 'add_support_member',
+    kind: 'WRITE',
+    description:
+      'Register a colleague so their WhatsApp replies count as human support. Not retroactive — it changes how future messages are classified.',
+    permission: 'team.manage',
+    parameters: [
+      { name: 'displayName', type: 'string', required: true },
+      { name: 'phone', type: 'string', required: true },
+      { name: 'jobRole', type: 'string', required: false },
+    ],
+  },
+  {
+    name: 'set_group_ai',
+    kind: 'WRITE',
+    description:
+      'Turn AI replies on or off for groups. Disabling is an absolute veto — no AI reply can reach those groups afterwards, whatever else is enabled.',
+    permission: 'groups.bulk_update',
+    parameters: [
+      { name: 'monitoringState', type: 'string', required: false },
+      { name: 'enabled', type: 'boolean', required: true },
+    ],
+  },
 ];
+
 
 export function findTool(name: string): CopilotTool | null {
   return COPILOT_TOOLS.find((tool) => tool.name === name) ?? null;

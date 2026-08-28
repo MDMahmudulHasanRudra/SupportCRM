@@ -8,6 +8,8 @@ import { Group } from '../groups/entities/group.entity';
 import { Message } from '../messaging/entities/message.entity';
 import { AiModule } from '../ai/ai.module';
 import { ReportsModule } from '../reports/reports.module';
+import { KnowledgeModule } from '../knowledge/knowledge.module';
+import { TeamModule } from '../team/team.module';
 import { CandidatesController } from './candidates.controller';
 import { CopilotController } from './copilot.controller';
 import { CandidateDetectorService } from './candidate-detector.service';
@@ -25,6 +27,10 @@ import { CopilotAction } from './entities/copilot-action.entity';
   imports: [
     TypeOrmModule.forFeature([CopilotAction, AutomationCandidate, AutomationRule, Group, Escalation, Message]),
     ReportsModule,
+    // Both are channel-agnostic, so importing them keeps the boundary noted above intact: the
+    // Copilot still cannot reach `messaging`, `channel` or the decision engine.
+    KnowledgeModule,
+    TeamModule,
     AiModule,
     AuditModule,
   ],

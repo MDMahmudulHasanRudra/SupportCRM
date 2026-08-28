@@ -10,6 +10,7 @@ import { OutboundMessage } from '../messaging/entities/outbound-message.entity';
 import { ReportsController } from './reports.controller';
 import { ReportsService } from './reports.service';
 import { OperationsAnalyticsService } from './operations-analytics.service';
+import { ActivityAnalyticsService } from './activity-analytics.service';
 
 /**
  * Reporting (`PROJECT_SPEC.md` §100–§106).
@@ -23,7 +24,7 @@ import { OperationsAnalyticsService } from './operations-analytics.service';
     TypeOrmModule.forFeature([Conversation, OutboundMessage, DecisionLog, Escalation, Group, Job, Broadcast]),
   ],
   controllers: [ReportsController],
-  providers: [ReportsService, OperationsAnalyticsService],
-  exports: [ReportsService, OperationsAnalyticsService],
+  providers: [ReportsService, OperationsAnalyticsService, ActivityAnalyticsService],
+  exports: [ReportsService, OperationsAnalyticsService, ActivityAnalyticsService],
 })
 export class ReportsModule {}

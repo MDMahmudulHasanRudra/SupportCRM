@@ -5,6 +5,7 @@ import {
   Card,
   ConfirmDialog,
   Empty,
+  Field,
   ErrorState,
   Loading,
   PageHeader,
@@ -37,6 +38,7 @@ export function CopilotPage() {
   const [asking, setAsking] = useState(false);
   const [answer, setAnswer] = useState<CopilotAnswer | null>(null);
   const [confirming, setConfirming] = useState<CopilotAction | null>(null);
+  const [configuring, setConfiguring] = useState<CopilotTool | null>(null);
   const [busy, setBusy] = useState(false);
 
   const load = useCallback(async () => {
@@ -71,11 +73,18 @@ export function CopilotPage() {
     }
   }
 
-  async function runTool(tool: CopilotTool) {
+  /**
+   * Runs a tool, optionally with arguments.
+   *
+   * Tools that declare required parameters cannot be run from a bare button — the backend validates
+   * arguments and would refuse. Those open a small form first; the rest run straight away, which is
+   * how this screen already behaved.
+   */
+  async function runTool(tool: CopilotTool, args: Record<string, unknown> = {}) {
     setAsking(true);
     setAnswer(null);
     try {
-      const action = await copilot.invoke({ prompt: `Run ${tool.name}`, tool: tool.name, arguments: {} });
+      const action = await copilot.invoke({ prompt: `Run ${tool.name}`, tool: tool.name, arguments: args });
       setAnswer({ answered: true, message: tool.description, action, suggestions: [] });
       if (action.kind === 'WRITE') setConfirming(action);
       await load();
@@ -210,9 +219,13 @@ export function CopilotPage() {
                     </td>
                     <td className="small">{tool.description}</td>
                     <td>
-                      {tool.parameters.every((parameter) => !parameter.required) && (
+                      {tool.parameters.length === 0 ? (
                         <button type="button" disabled={asking} onClick={() => void runTool(tool)}>
                           Run
+                        </button>
+                      ) : (
+                        <button type="button" disabled={asking} onClick={() => setConfiguring(tool)}>
+                          {tool.parameters.some((parameter) => parameter.required) ? 'Configure…' : 'Run…'}
                         </button>
                       )}
                     </td>
@@ -222,6 +235,19 @@ export function CopilotPage() {
             </table>
           </TableWrap>
         </Card>
+      )}
+
+      {configuring && (
+        <ToolArguments
+          tool={configuring}
+          busy={asking}
+          onCancel={() => setConfiguring(null)}
+          onRun={(args) => {
+            const tool = configuring;
+            setConfiguring(null);
+            void runTool(tool, args);
+          }}
+        />
       )}
 
       <Card title="Recent activity">
@@ -313,4 +339,97 @@ function prettyResult(result: string): string {
   } catch {
     return result;
   }
+}
+
+
+/**
+ * Collects a tool's declared arguments before running it.
+ *
+ * Built from `tool.parameters` rather than hand-written per tool, so a tool added to the backend
+ * registry becomes runnable here without a frontend change — which is the same reason the tool list
+ * itself is fetched rather than hard-coded.
+ *
+ * Running is still only a *proposal* for a WRITE tool: the existing confirmation dialog appears
+ * afterwards with the blast radius, and nothing is applied until that is accepted.
+ */
+function ToolArguments({
+  tool,
+  busy,
+  onCancel,
+  onRun,
+}: {
+  tool: CopilotTool;
+  busy: boolean;
+  onCancel: () => void;
+  onRun: (args: Record<string, unknown>) => void;
+}) {
+  const [values, setValues] = useState<Record<string, string>>({});
+
+  const missing = tool.parameters
+    .filter((parameter) => parameter.required && !String(values[parameter.name] ?? '').trim())
+    .map((parameter) => parameter.name);
+
+  const submit = () => {
+    const args: Record<string, unknown> = {};
+    for (const parameter of tool.parameters) {
+      const raw = String(values[parameter.name] ?? '').trim();
+      // An omitted optional argument is left out entirely rather than sent as an empty string —
+      // the backend distinguishes "not given" from "given as blank".
+      if (!raw) continue;
+      if (parameter.type === 'number') args[parameter.name] = Number(raw);
+      else if (parameter.type === 'boolean') args[parameter.name] = raw === 'true';
+      else args[parameter.name] = raw;
+    }
+    onRun(args);
+  };
+
+  return (
+    <ConfirmDialog
+      title={`Run ${tool.name}`}
+      body={
+        <div className="stack">
+          <p className="muted small">{tool.description}</p>
+          {tool.parameters.map((parameter) => (
+            <Field
+              key={parameter.name}
+              label={`${parameter.name}${parameter.required ? '' : ' (optional)'}`}
+              hint={parameter.type}
+            >
+              {parameter.type === 'boolean' ? (
+                <select
+                  value={values[parameter.name] ?? ''}
+                  onChange={(event) =>
+                    setValues((current) => ({ ...current, [parameter.name]: event.target.value }))
+                  }
+                >
+                  <option value="">Choose…</option>
+                  <option value="true">true</option>
+                  <option value="false">false</option>
+                </select>
+              ) : (
+                <input
+                  value={values[parameter.name] ?? ''}
+                  onChange={(event) =>
+                    setValues((current) => ({ ...current, [parameter.name]: event.target.value }))
+                  }
+                  placeholder={parameter.type}
+                />
+              )}
+            </Field>
+          ))}
+          {tool.kind === 'WRITE' && (
+            <p className="muted small">
+              This only proposes the change. You will see how much it affects before anything happens.
+            </p>
+          )}
+        </div>
+      }
+      confirmLabel={missing.length > 0 ? `Fill in ${missing.join(', ')}` : 'Run'}
+      busy={busy}
+      onCancel={onCancel}
+      onConfirm={() => {
+        if (missing.length === 0) submit();
+      }}
+    />
+  );
 }
