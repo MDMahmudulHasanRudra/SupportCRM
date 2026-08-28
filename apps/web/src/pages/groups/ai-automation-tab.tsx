@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useState } from 'react';
 import { groups, type GroupAiStatus } from '../../api/client';
+import { IconAlertCircle } from '../../components/icons';
 import { Badge, Card, ErrorState, Loading, errorMessage, humanise } from '../../components/ui';
 
 /**
@@ -36,7 +37,8 @@ export function AiAutomationTab({ groupId }: { groupId: string }) {
   }, [load]);
 
   if (loading && !status) return <Loading label="Checking AI permissions…" />;
-  if (failure) return <ErrorState message={failure} onRetry={() => void load()} />;
+  if (failure)
+    return <ErrorState message={failure} onRetry={() => void load()} icon={<IconAlertCircle size={20} />} />;
   if (!status) return null;
 
   return (

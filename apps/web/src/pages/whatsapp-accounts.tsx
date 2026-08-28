@@ -4,9 +4,9 @@ import { whatsapp, type WhatsAppAccount } from '../api/client';
 import { onChannelStatus } from '../api/realtime';
 import { useAuth } from '../auth-context';
 import { ConnectPanel } from '../components/connect-panel';
-import { IconMessageCircle, IconPlug, IconRefresh } from '../components/icons';
+import { IconAlertCircle, IconMessageCircle, IconPlug, IconRefresh } from '../components/icons';
 import { RelativeTime, StatusBadge } from '../components/status-badge';
-import { Empty, ErrorState, Loading, PageHeader } from '../components/ui';
+import { Card, Empty, ErrorState, Loading, PageHeader } from '../components/ui';
 
 /**
  * WhatsApp Accounts.
@@ -87,19 +87,18 @@ export function WhatsAppAccountsPage() {
         }
       />
 
-      {error && <ErrorState message={error} onRetry={() => void load()} />}
+      {error && <ErrorState message={error} onRetry={() => void load()} icon={<IconAlertCircle size={20} />} />}
 
       <div className="wa-grid">
         {/* --- the accounts themselves ------------------------------------------------------- */}
-        <div className="card card-pad stack">
-          <strong>Your accounts</strong>
-
+        <Card title="Your accounts">
           {accounts === null ? (
             <Loading label="Checking connections…" />
           ) : accounts.length === 0 ? (
             <Empty
               title="No WhatsApp account yet"
               hint="Scan the code beside this to link your first number. Nothing else in the console does anything until then."
+              icon={<IconPlug size={20} />}
             />
           ) : (
             accounts.map((account) => (
@@ -193,7 +192,7 @@ export function WhatsAppAccountsPage() {
               </div>
             ))
           )}
-        </div>
+        </Card>
 
         {/* --- pairing ------------------------------------------------------------------------ */}
         {manage ? (

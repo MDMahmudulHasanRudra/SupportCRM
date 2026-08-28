@@ -13,15 +13,15 @@ import {
   type WhatsAppAccount,
 } from '../../api/client';
 import { useAuth } from '../../auth-context';
-import { IconRadio, IconRefresh, IconSparkles, IconZap } from '../../components/icons';
+import { IconAlertCircle, IconRadio, IconRefresh, IconSparkles, IconZap } from '../../components/icons';
 import {
   Badge,
   ConfirmDialog,
   Empty,
   ErrorState,
-  Loading,
   PageHeader,
   RelativeTime,
+  Skeleton,
   Stat,
   StatGrid,
   TableWrap,
@@ -297,7 +297,7 @@ export function GroupOperationsPage() {
         }
       />
 
-      {error && <ErrorState message={error} onRetry={() => void load()} />}
+      {error && <ErrorState message={error} onRetry={() => void load()} icon={<IconAlertCircle size={20} />} />}
 
       {summary && (
         <StatGrid>
@@ -477,7 +477,7 @@ export function GroupOperationsPage() {
       <div className="card" style={{ marginTop: 14 }}>
         {loading && !rows ? (
           <div style={{ padding: 18 }}>
-            <Loading label="Loading groups…" />
+            <Skeleton lines={8} height={40} />
           </div>
         ) : rows && rows.length === 0 ? (
           <Empty
@@ -495,6 +495,7 @@ export function GroupOperationsPage() {
                 ? 'Try widening the filters.'
                 : 'Sync an account’s groups from the WhatsApp screen to see them here.'
             }
+            icon={<IconRadio size={20} />}
           />
         ) : (
           <TableWrap>

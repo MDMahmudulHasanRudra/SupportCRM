@@ -10,7 +10,7 @@ import {
 } from '../api/client';
 import { onChannelStatus } from '../api/realtime';
 import { useAuth } from '../auth-context';
-import { IconPlug, IconRefresh } from '../components/icons';
+import { IconAlertCircle, IconInbox, IconPlug, IconRefresh } from '../components/icons';
 import { RelativeTime } from '../components/status-badge';
 import {
   Badge,
@@ -89,7 +89,7 @@ export function WhatsAppAccountPage() {
     }
   }
 
-  if (error) return <ErrorState message={error} onRetry={() => void load()} />;
+  if (error) return <ErrorState message={error} onRetry={() => void load()} icon={<IconAlertCircle size={20} />} />;
   if (!account) return <Loading label="Loading account…" />;
 
   const monitored = groupRows?.filter((group) => group.monitoringState === 'MONITORED').length ?? 0;
@@ -255,7 +255,11 @@ export function WhatsAppAccountPage() {
           {!events ? (
             <Loading label="Loading…" />
           ) : events.length === 0 ? (
-            <Empty title="Nothing recorded yet" hint="Connection changes for this account appear here." />
+            <Empty
+              title="Nothing recorded yet"
+              hint="Connection changes for this account appear here."
+              icon={<IconInbox size={20} />}
+            />
           ) : (
             <div className="table-wrap">
               <table>

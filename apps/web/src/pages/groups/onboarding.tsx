@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useState } from 'react';
 import { onboarding, whatsapp, automation, type AutomationProfile, type OnboardingRule, type WhatsAppAccount } from '../../api/client';
 import { useAuth } from '../../auth-context';
+import { IconAlertCircle, IconUsers } from '../../components/icons';
 import {
   Badge,
   Card,
@@ -159,7 +160,7 @@ export function OnboardingRulesPage() {
         description="What a newly discovered group should be configured as. Rules are checked in priority order and the first match wins; a group is only ever onboarded once, so a later change you make by hand is never overwritten."
       />
 
-      {error && <ErrorState message={error} onRetry={() => void load()} />}
+      {error && <ErrorState message={error} onRetry={() => void load()} icon={<IconAlertCircle size={20} />} />}
 
       {rules === null ? (
         <Loading label="Loading rules…" />
@@ -167,6 +168,7 @@ export function OnboardingRulesPage() {
         <Empty
           title="No onboarding rules"
           hint="Without one, every newly discovered group arrives unmonitored with automation off — safe, but it means configuring each by hand."
+          icon={<IconUsers size={20} />}
         />
       ) : (
         <TableWrap>

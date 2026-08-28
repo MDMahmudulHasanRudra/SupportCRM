@@ -12,7 +12,7 @@ import {
 } from '../../api/client';
 import { useAuth } from '../../auth-context';
 import { AiAutomationTab } from './ai-automation-tab';
-import { IconRefresh } from '../../components/icons';
+import { IconAlertCircle, IconMessageCircle, IconRefresh, IconUsers } from '../../components/icons';
 import {
   Badge,
   Card,
@@ -82,7 +82,8 @@ export function GroupDetailPage() {
   }, [load]);
 
   if (loading && !group) return <Loading label="Loading group…" />;
-  if (failure && !group) return <ErrorState message={failure} onRetry={() => void load()} />;
+  if (failure && !group)
+    return <ErrorState message={failure} onRetry={() => void load()} icon={<IconAlertCircle size={20} />} />;
   if (!group) return null;
 
   return (
@@ -449,7 +450,8 @@ function MessageTab({
   // Only claim to be loading on a first load with nothing filtered. Under a filter an empty result
   // is an answer — "no messages match" — not a page still arriving.
   if (loading && items.length === 0 && !filtered) return <Loading label="Loading messages…" />;
-  if (failure) return <ErrorState message={failure} onRetry={() => void load()} />;
+  if (failure)
+    return <ErrorState message={failure} onRetry={() => void load()} icon={<IconAlertCircle size={20} />} />;
 
   return (
     <Card title={`${title} · ${total}`} actions={hint ? <span className="muted small">{hint}</span> : undefined}>
@@ -528,6 +530,7 @@ function MessageTab({
         <Empty
           title={filtered ? 'No messages match these filters.' : (empty ?? 'No messages yet.')}
           hint={filtered ? 'Try widening the date range or clearing a filter.' : undefined}
+          icon={<IconMessageCircle size={20} />}
         />
       ) : (
         <>
@@ -618,7 +621,8 @@ function MembersTab({ group }: { group: GroupDetail }) {
   };
 
   if (loading && items.length === 0) return <Loading label="Loading members…" />;
-  if (failure) return <ErrorState message={failure} onRetry={() => void load()} />;
+  if (failure)
+    return <ErrorState message={failure} onRetry={() => void load()} icon={<IconAlertCircle size={20} />} />;
 
   return (
     <Card
@@ -643,6 +647,7 @@ function MembersTab({ group }: { group: GroupDetail }) {
               ? undefined
               : 'Syncing imports the phone numbers of everyone in the group, so it is a deliberate step.'
           }
+          icon={<IconUsers size={20} />}
         />
       ) : (
         <TableWrap>

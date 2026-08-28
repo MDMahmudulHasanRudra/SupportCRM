@@ -2,7 +2,7 @@ import { useCallback, useEffect, useState } from 'react';
 import { Link } from 'react-router-dom';
 import { support, team, type SupportMemberRow } from '../../api/client';
 import { useAuth } from '../../auth-context';
-import { IconRefresh, IconUsers } from '../../components/icons';
+import { IconAlertCircle, IconRefresh, IconUsers } from '../../components/icons';
 import {
   Badge,
   Card,
@@ -86,7 +86,9 @@ export function SupportMembersPage() {
         }
       />
 
-      {failure && <ErrorState message={failure} onRetry={() => void load()} />}
+      {failure && (
+        <ErrorState message={failure} onRetry={() => void load()} icon={<IconAlertCircle size={20} />} />
+      )}
 
       <StatGrid>
         <Stat label="Registered" value={rows.length} icon={<IconUsers size={17} />} />
@@ -115,6 +117,7 @@ export function SupportMembersPage() {
           <Empty
             title="No support members registered yet."
             hint="Until a colleague's number is registered here, their replies are indistinguishable from a customer's and are not counted as support activity."
+            icon={<IconUsers size={20} />}
           />
         ) : (
           <TableWrap>

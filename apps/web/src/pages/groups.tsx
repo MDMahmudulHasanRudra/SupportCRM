@@ -2,7 +2,9 @@ import { useCallback, useEffect, useState } from 'react';
 import { Link, useParams } from 'react-router-dom';
 import { groups as groupsApi, whatsapp, type WhatsAppAccount, type WhatsAppGroup } from '../api/client';
 import { useAuth } from '../auth-context';
+import { IconUsers } from '../components/icons';
 import { RelativeTime } from '../components/status-badge';
+import { Empty, Skeleton } from '../components/ui';
 
 /**
  * The groups of one WhatsApp account.
@@ -103,22 +105,22 @@ export function GroupsPage() {
 
       <div className="card">
         {items === null ? (
-          <div className="empty">
-            <div className="progress" style={{ justifyContent: 'center' }}>
-              <span className="spinner" aria-hidden="true" />
-              <span>Loading…</span>
-            </div>
+          <div style={{ padding: 14 }}>
+            <Skeleton lines={5} />
           </div>
         ) : items.length === 0 ? (
-          <div className="empty">
-            <h2>No groups yet</h2>
-            <p>Refresh the group list to pull this account&rsquo;s groups from WhatsApp.</p>
-            {manage && (
-              <button type="button" className="primary" onClick={() => void syncList()} disabled={syncingList}>
-                {syncingList ? 'Refreshing…' : 'Refresh group list'}
-              </button>
-            )}
-          </div>
+          <Empty
+            title="No groups yet"
+            hint="Refresh the group list to pull this account’s groups from WhatsApp."
+            icon={<IconUsers size={20} />}
+            action={
+              manage && (
+                <button type="button" className="primary" onClick={() => void syncList()} disabled={syncingList}>
+                  {syncingList ? 'Refreshing…' : 'Refresh group list'}
+                </button>
+              )
+            }
+          />
         ) : (
           <div className="table-wrap">
             <table>

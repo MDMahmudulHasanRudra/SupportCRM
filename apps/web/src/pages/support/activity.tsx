@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useState } from 'react';
 import { Link } from 'react-router-dom';
 import { support, type SupportDayMember, type SupportTeamDay } from '../../api/client';
-import { IconRefresh } from '../../components/icons';
+import { IconAlertCircle, IconMessageCircle, IconRefresh, IconUsers } from '../../components/icons';
 import {
   Card,
   Empty,
@@ -96,7 +96,7 @@ export function SupportActivityPage() {
         }
       />
 
-      {failure && <ErrorState message={failure} onRetry={() => void load()} />}
+      {failure && <ErrorState message={failure} onRetry={() => void load()} icon={<IconAlertCircle size={20} />} />}
 
       <div className="row">
         {WINDOWS.map((option) => (
@@ -124,6 +124,7 @@ export function SupportActivityPage() {
           <Empty
             title="No support replies recorded in this window."
             hint="Replies are only counted for registered support members. If colleagues are answering but nobody is registered, their messages are not attributed to anyone."
+            icon={<IconMessageCircle size={20} />}
           />
         ) : (
           <TrendChart
@@ -187,7 +188,7 @@ export function SupportActivityPage() {
           {dayLoading ? (
             <Loading label="Loading…" />
           ) : !dayMembers || dayMembers.length === 0 ? (
-            <Empty title="Nobody replied on this day." />
+            <Empty title="Nobody replied on this day." icon={<IconUsers size={20} />} />
           ) : (
             <TableWrap>
               <table>
