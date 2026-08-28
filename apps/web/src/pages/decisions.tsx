@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useState } from 'react';
 import { ai, aiMemory, decisions, type AITurn, type DecisionLog, type DecisionTrace } from '../api/client';
 import { useAuth } from '../auth-context';
+import { IconAlertCircle, IconInbox } from '../components/icons';
 import { ConfidenceNote, OutcomeChip, describeOutcome } from './automation/chips';
 import {
   Empty,
@@ -69,7 +70,7 @@ export function DecisionsPage() {
         description="One row per incoming customer message. Team messages and the system's own replies never enter this pipeline at all, which is what stops the system answering itself."
       />
 
-      {error && <ErrorState message={error} onRetry={() => void load()} />}
+      {error && <ErrorState message={error} onRetry={() => void load()} icon={<IconAlertCircle size={20} />} />}
 
       <div className="toolbar">
         <Field label="Outcome">
@@ -106,6 +107,7 @@ export function DecisionsPage() {
               ? 'Try a different outcome, or clear the filter.'
               : 'A decision is recorded for every inbound customer message. Nothing has arrived yet, or automation has not been switched on for any conversation.'
           }
+          icon={<IconInbox size={20} />}
         />
       ) : (
         <TableWrap>

@@ -7,6 +7,7 @@ import {
   type CustomerWithTags,
 } from '../api/client';
 import { useAuth } from '../auth-context';
+import { IconAlertCircle, IconUserCircle, IconUsers } from '../components/icons';
 import {
   Badge,
   Card,
@@ -16,6 +17,7 @@ import {
   Loading,
   PageHeader,
   RelativeTime,
+  Skeleton,
   errorMessage,
   humanise,
   useToast,
@@ -118,15 +120,17 @@ export function CustomersPage() {
           <div className="inbox-list">
             {listError && (
               <div style={{ padding: 14 }}>
-                <ErrorState message={listError} onRetry={() => void loadList()} />
+                <ErrorState message={listError} onRetry={() => void loadList()} icon={<IconAlertCircle />} />
               </div>
             )}
             {!items && !listError && (
               <div style={{ padding: 14 }}>
-                <Loading label="Loading customers…" />
+                <Skeleton lines={8} height={40} />
               </div>
             )}
-            {items && items.length === 0 && <Empty title="No customers" hint="Nothing matches this search yet." />}
+            {items && items.length === 0 && (
+              <Empty title="No customers" hint="Nothing matches this search yet." icon={<IconUsers />} />
+            )}
             {items?.map((customer) => (
               <button
                 key={customer.id}
@@ -144,10 +148,16 @@ export function CustomersPage() {
         <div className="stack">
           {!selectedId && (
             <Card>
-              <Empty title="Select a customer" hint="Pick one from the list to see their identities, notes and tags." />
+              <Empty
+                title="Select a customer"
+                hint="Pick one from the list to see their identities, notes and tags."
+                icon={<IconUserCircle />}
+              />
             </Card>
           )}
-          {selectedId && detailError && <ErrorState message={detailError} onRetry={() => void loadDetail(selectedId)} />}
+          {selectedId && detailError && (
+            <ErrorState message={detailError} onRetry={() => void loadDetail(selectedId)} icon={<IconAlertCircle />} />
+          )}
           {selectedId && !detail && !detailError && (
             <Card>
               <Loading label="Loading…" />

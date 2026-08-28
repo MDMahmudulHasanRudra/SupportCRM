@@ -23,7 +23,15 @@ import { onConversationEvent } from '../api/realtime';
 import { useAuth } from '../auth-context';
 import { AutomationStack, type AutomationLayers } from '../components/automation-stack';
 import { buildDirectory, type Destination } from './conversation-directory';
-import { IconMessageCircle, IconRefresh, IconSend, IconUsers } from '../components/icons';
+import {
+  IconAlertCircle,
+  IconInbox,
+  IconMessageCircle,
+  IconPlug,
+  IconRefresh,
+  IconSend,
+  IconUsers,
+} from '../components/icons';
 import {
   Badge,
   Empty,
@@ -32,6 +40,7 @@ import {
   Loading,
   PageHeader,
   RelativeTime,
+  Skeleton,
   errorMessage,
   humanise,
   useToast,
@@ -336,6 +345,7 @@ export function ConversationsPage() {
           <Empty
             title="No WhatsApp account connected"
             hint="Connect a WhatsApp account to start receiving conversations and messaging customers or groups."
+            icon={<IconPlug size={20} />}
             action={
               <Link to="/channels/whatsapp" className="button-link">
                 Connect WhatsApp
@@ -400,12 +410,12 @@ export function ConversationsPage() {
           <div className="inbox-list">
             {listError && (
               <div style={{ padding: 14 }}>
-                <ErrorState message={listError} onRetry={() => void loadDirectory()} />
+                <ErrorState message={listError} onRetry={() => void loadDirectory()} icon={<IconAlertCircle size={20} />} />
               </div>
             )}
             {listLoading && destinations.length === 0 && !listError && (
               <div style={{ padding: 14 }}>
-                <Loading label="Loading contacts and groups…" />
+                <Skeleton lines={8} />
               </div>
             )}
             {!listLoading && destinations.length === 0 && !listError && (
@@ -418,6 +428,7 @@ export function ConversationsPage() {
                       ? 'Link a WhatsApp account, then sync its groups to message them.'
                       : 'Messages from your connected accounts appear here. Sync an account’s groups to message them first.'
                 }
+                icon={<IconInbox size={20} />}
               />
             )}
 
@@ -460,7 +471,11 @@ export function ConversationsPage() {
         {/* --- thread ------------------------------------------------------------------------- */}
         <div className="inbox-pane">
           {!destination ? (
-            <Empty title="Select a contact or group" hint="Pick one from the list to read its history and reply." />
+            <Empty
+              title="Select a contact or group"
+              hint="Pick one from the list to read its history and reply."
+              icon={<IconMessageCircle size={20} />}
+            />
           ) : (
             <>
               <div className="thread-head">
@@ -506,7 +521,11 @@ export function ConversationsPage() {
 
               {threadError && (
                 <div style={{ padding: 14 }}>
-                  <ErrorState message={threadError} onRetry={() => void loadThread(destination)} />
+                  <ErrorState
+                    message={threadError}
+                    onRetry={() => void loadThread(destination)}
+                    icon={<IconAlertCircle size={20} />}
+                  />
                 </div>
               )}
 
@@ -520,6 +539,7 @@ export function ConversationsPage() {
                         ? 'This conversation has no messages recorded.'
                         : 'Nothing has been said here yet. Send the first message below.'
                     }
+                    icon={<IconMessageCircle size={20} />}
                   />
                 )}
 
@@ -851,6 +871,7 @@ function NewMessageDialog({
             <Empty
               title="Nothing matches"
               hint="Only contacts and groups already known to Support CRM can be messaged. Sync an account’s groups to add more."
+              icon={<IconInbox size={20} />}
             />
           )}
 

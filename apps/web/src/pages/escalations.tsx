@@ -2,6 +2,7 @@ import { useCallback, useEffect, useState } from 'react';
 import { Link } from 'react-router-dom';
 import { escalationConfig, escalations, type Escalation } from '../api/client';
 import { useAuth } from '../auth-context';
+import { IconAlertCircle, IconInbox } from '../components/icons';
 import {
   Badge,
   Card,
@@ -119,7 +120,7 @@ export function EscalationsPage() {
         }
       />
 
-      {error && <ErrorState message={error} onRetry={() => void load()} />}
+      {error && <ErrorState message={error} onRetry={() => void load()} icon={<IconAlertCircle size={20} />} />}
 
       <div className="toolbar">
         <Field label="Status">
@@ -143,6 +144,7 @@ export function EscalationsPage() {
               ? 'Every conversation is either being handled automatically or has been dealt with.'
               : 'Try a different status.'
           }
+          icon={<IconInbox size={20} />}
         />
       ) : (
         <div className="stack">

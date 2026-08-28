@@ -196,7 +196,7 @@ export function ReportsPage() {
           </StatGrid>
 
           {trend && trend.length > 0 && (
-            <div style={{ marginTop: 14 }}>
+            <div style={{ marginTop: 'var(--space-6)' }}>
               <Card title="Activity over time" actions={<span className="muted small">Counted per day</span>}>
                 <TrendChart
                   points={trend as unknown as Array<Record<string, string | number>>}
@@ -210,7 +210,7 @@ export function ReportsPage() {
             </div>
           )}
 
-          <div className="split" style={{ marginTop: 14 }}>
+          <div className="split" style={{ marginTop: 'var(--space-6)' }}>
             <Card title="Decisions by outcome">
               {Object.keys(dashboard.decisions.byOutcome).length === 0 ? (
                 <Empty title="No decisions in this range" hint="Nothing has come in, or automation has not been switched on for any conversation yet." />
