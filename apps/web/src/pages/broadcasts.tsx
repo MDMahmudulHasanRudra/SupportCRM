@@ -10,6 +10,7 @@ import {
   type WhatsAppGroup,
 } from '../api/client';
 import { useAuth } from '../auth-context';
+import { IconAlertCircle, IconMegaphone } from '../components/icons';
 import {
   Badge,
   Card,
@@ -195,7 +196,7 @@ export function BroadcastsPage() {
         description="One message to many recipients. Replies come back through the normal inbox and are decided on like any other message."
       />
 
-      {error && <ErrorState message={error} onRetry={() => void load()} />}
+      {error && <ErrorState message={error} onRetry={() => void load()} icon={<IconAlertCircle size={20} />} />}
 
       {canCreate && (
         <Card title="New broadcast">
@@ -285,7 +286,11 @@ export function BroadcastsPage() {
       {items === null ? (
         <Loading label="Loading campaigns…" />
       ) : items.length === 0 ? (
-        <Empty title="No broadcasts yet" hint="A saved draft appears here, with a preview and a test send before anything goes out." />
+        <Empty
+          title="No broadcasts yet"
+          hint="A saved draft appears here, with a preview and a test send before anything goes out."
+          icon={<IconMegaphone size={20} />}
+        />
       ) : (
         <TableWrap>
           <table>

@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useState } from 'react';
 import { rateLimits, type EffectiveRateLimit, type RateLimitScope } from '../../api/client';
 import { useAuth } from '../../auth-context';
+import { IconAlertCircle } from '../../components/icons';
 import {
   Badge,
   Card,
@@ -95,7 +96,7 @@ export function RateLimitsPage() {
         description="What the system allows itself to send. These protect your WhatsApp account and the people receiving messages — they are not a way around a platform's own limits."
       />
 
-      {error && <ErrorState message={error} onRetry={() => void load()} />}
+      {error && <ErrorState message={error} onRetry={() => void load()} icon={<IconAlertCircle size={20} />} />}
 
       {items === null ? (
         <Loading label="Loading limits…" />

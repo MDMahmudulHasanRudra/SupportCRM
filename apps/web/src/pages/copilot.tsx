@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useState } from 'react';
 import { copilot, type CopilotAction, type CopilotAnswer, type CopilotTool } from '../api/client';
+import { IconAlertCircle, IconBot } from '../components/icons';
 import {
   Badge,
   Card,
@@ -131,7 +132,7 @@ export function CopilotPage() {
         description="Ask about what the system is doing. It answers from real data, and anything that would change something stops and asks you first."
       />
 
-      {error && <ErrorState message={error} onRetry={() => void load()} />}
+      {error && <ErrorState message={error} onRetry={() => void load()} icon={<IconAlertCircle size={20} />} />}
 
       <Card>
         <div className="row">
@@ -191,6 +192,7 @@ export function CopilotPage() {
         <Empty
           title="No tools available to you"
           hint="Copilot tools are gated by the same permissions as the rest of the console. Ask an administrator for the ones you need."
+          icon={<IconBot size={20} />}
         />
       ) : (
         <Card title="What it can do">

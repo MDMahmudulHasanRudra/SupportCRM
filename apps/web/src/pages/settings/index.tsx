@@ -3,12 +3,15 @@ import { Link } from 'react-router-dom';
 import { rbac, settings as settingsApi, type PermissionRow, type RoleRow, type SettingRow } from '../../api/client';
 import { useAuth } from '../../auth-context';
 import {
+  IconAlertCircle,
   IconBookOpen,
   IconMessageCircle,
   IconOctagonAlert,
+  IconSettings,
   IconShieldAlert,
   IconSliders,
   IconSparkles,
+  IconUsers,
   IconZap,
 } from '../../components/icons';
 import { Badge, Card, Empty, ErrorState, Loading, PageHeader, TableWrap, errorMessage, humanise } from '../../components/ui';
@@ -76,7 +79,7 @@ export function SettingsPage() {
         description="What the system is configured to do, and who is allowed to change it."
       />
 
-      {error && <ErrorState message={error} onRetry={() => void load()} />}
+      {error && <ErrorState message={error} onRetry={() => void load()} icon={<IconAlertCircle size={20} />} />}
 
       {/* Configuration that already owns a screen is linked, never duplicated. */}
       <div className="settings-links">
@@ -115,7 +118,7 @@ export function SettingsPage() {
             {!flags ? (
               <Loading label="Loading…" />
             ) : Object.keys(flags.featureFlags).length === 0 ? (
-              <Empty title="No feature flags" hint="Nothing is gated behind a flag." />
+              <Empty title="No feature flags" hint="Nothing is gated behind a flag." icon={<IconSliders size={20} />} />
             ) : (
               <div className="rowlist">
                 {Object.entries(flags.featureFlags).map(([key, enabled]) => (
@@ -165,7 +168,7 @@ export function SettingsPage() {
             {!roles ? (
               <Loading label="Loading…" />
             ) : roles.length === 0 ? (
-              <Empty title="No roles" />
+              <Empty title="No roles" icon={<IconUsers size={20} />} />
             ) : (
               <TableWrap>
                 <table>
@@ -227,7 +230,7 @@ export function SettingsPage() {
           {!rows ? (
             <Loading label="Loading…" />
           ) : rows.length === 0 ? (
-            <Empty title="Nothing stored" hint="Every value is still at its default." />
+            <Empty title="Nothing stored" hint="Every value is still at its default." icon={<IconSettings size={20} />} />
           ) : (
             <TableWrap>
               <table>
