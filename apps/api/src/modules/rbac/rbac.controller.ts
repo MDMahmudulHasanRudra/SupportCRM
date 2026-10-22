@@ -4,7 +4,7 @@ import { ApiOperation, ApiTags } from '@nestjs/swagger';
 import { ArrayUnique, IsArray, IsString } from 'class-validator';
 import type { Request } from 'express';
 import { In, Repository } from 'typeorm';
-import { BadRequestException, NotFoundException } from '@nestjs/common';
+import { BadRequestException, ForbiddenException, NotFoundException } from '@nestjs/common';
 import { AuditService } from '../audit/audit.service';
 import type { AuthenticatedUser } from '../auth/auth.service';
 import { Permission } from './entities/permission.entity';
@@ -84,6 +84,9 @@ export class RbacController {
     }
 
     const before = role.permissions.map((p) => p.key).sort();
+    if (!user.isSuperAdmin && (resolved.some(p => !user.permissions.has(p.key)) || role.permissions.some(p => !user.permissions.has(p.key)))) {
+      throw new ForbiddenException('You can only edit roles whose current and requested permissions you hold.');
+    }
     role.permissions = resolved;
     await this.roles.save(role);
     const after = resolved.map((p) => p.key).sort();

@@ -244,6 +244,12 @@ export class WhatsAppChannelAdapter implements ChannelAdapter, OnModuleInit {
     await this.client.stopSession(this.gatewaySessionId(account));
   }
 
+  /** Explicit unlink; callers must enforce confirmation, permissions and recovery intent. */
+  async logout(channelAccountId: string): Promise<void> {
+    const account = await this.loadAccount(channelAccountId);
+    await this.client.logoutSession(this.gatewaySessionId(account));
+  }
+
   /**
    * The QR payload for pairing.
    *

@@ -40,21 +40,27 @@ export function ConnectPanel({
   }
 
   return (
-    <div className="card card-pad stack">
-      <div>
+    <section className="card card-pad stack pairing-panel" id="pairing" aria-label="Connect WhatsApp account">
+      <div className="pairing-panel-intro"><span><IconQrCode size={20} /></span><div>
         <strong>{account ? `Reconnect ${account.name}` : 'Connect new WhatsApp account'}</strong>
         <div className="muted small" style={{ marginTop: 2 }}>
           {phase === 'connected'
             ? 'This number is linked.'
             : 'Scan the code with the phone you want Support CRM to handle messages for.'}
         </div>
-      </div>
+      </div></div>
+      <ol className="pairing-progress" aria-label="Account connection steps">{['Account details', 'Scan QR code', 'Connected'].map((label,index) => {
+        const current = phase === 'connected' ? 2 : phase === 'starting' || phase === 'pairing' ? 1 : 0;
+        return <li key={label} className={index <= current ? 'current' : ''} aria-current={index === current ? 'step' : undefined}>{index + 1}. {label}</li>;
+      })}</ol>
 
       {phase === 'form' && (
         <>
           <Field label="Account name" hint="A name for your team — the phone number fills itself in once linked.">
             <input
+              id="whatsapp-account-name"
               value={name}
+              maxLength={120}
               placeholder="Support line"
               onChange={(event) => setName(event.target.value)}
               onKeyDown={(event) => {
@@ -143,6 +149,6 @@ export function ConnectPanel({
           </div>
         </>
       )}
-    </div>
+    </section>
   );
 }

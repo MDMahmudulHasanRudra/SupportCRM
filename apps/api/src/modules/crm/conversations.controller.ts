@@ -38,6 +38,7 @@ export class ListConversationsDto {
   @IsOptional() @IsUUID() channelAccountId?: string;
   @IsOptional() @QueryBoolean() @IsBoolean() unassignedOnly?: boolean;
   @IsOptional() @QueryBoolean() @IsBoolean() pinnedOnly?: boolean;
+  @IsOptional() @QueryBoolean() @IsBoolean() activeOnly?: boolean;
   @IsOptional() @IsString() @MaxLength(120) search?: string;
   @IsOptional() @Type(() => Number) @IsInt() @Min(1) @Max(100) limit?: number;
   @IsOptional() @Type(() => Number) @IsInt() @Min(0) offset?: number;
@@ -83,6 +84,7 @@ export class MessageHistoryDto {
   @IsOptional() @Type(() => Number) @IsInt() @Min(1) @Max(200) limit?: number;
   /** Cursor: the `sentAt` of the oldest message you already have. */
   @IsOptional() @IsISO8601() before?: string;
+  @IsOptional() @IsUUID() beforeId?: string;
 }
 
 /**
@@ -133,6 +135,7 @@ export class ConversationsController {
     return this.conversations.listMessages(id, {
       limit: query.limit,
       before: query.before ? new Date(query.before) : undefined,
+      beforeId: query.beforeId,
     });
   }
 

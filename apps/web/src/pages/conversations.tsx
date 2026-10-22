@@ -1,5 +1,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState, type FormEvent } from 'react';
-import { Link } from 'react-router-dom';
+import { Link, useSearchParams } from 'react-router-dom';
+import { workspace, type SavedReply } from '../api/workspace';
+import { MessageText } from '../components/message-text';
 import {
   conversations as conversationsApi,
   customers as customersApi,
@@ -71,6 +73,8 @@ function statusTone(status: ConversationStatusValue): Tone {
 /** A message the operator sent from here, while it is still in flight or after it failed. */
 interface PendingSend {
   id: number;
+  idempotencyKey: string;
+  quotedExternalId?: string;
   body: string;
   state: 'sending' | 'failed';
   error?: string;
@@ -91,6 +95,9 @@ interface PendingSend {
  */
 export function ConversationsPage() {
   const { can } = useAuth();
+  const [searchParams] = useSearchParams();
+  const requestedConversation = searchParams.get('conversation');
+  const deepLinkDone = useRef<string | null>(null);
   const toast = useToast();
   const canManage = can('conversations.manage');
   const canTakeover = can('conversations.takeover');
@@ -126,6 +133,49 @@ export function ConversationsPage() {
   const [pending, setPending] = useState<PendingSend[]>([]);
   const [working, setWorking] = useState(false);
   const [composing, setComposing] = useState(false);
+  const [savedReplies, setSavedReplies] = useState<SavedReply[]>([]);
+  const [threadSearch, setThreadSearch] = useState('');
+  const [olderCursor, setOlderCursor] = useState<string | null>(null);
+  const [olderCursorId, setOlderCursorId] = useState<string | null>(null);
+  const [quoted, setQuoted] = useState<ConversationMessage | null>(null);
+  const [loadingOlder, setLoadingOlder] = useState(false);
+  const draftCache = useRef<Record<string, string>>({});
+  const activeDraftKey = useRef<string | null>(null);
+  const draftTimers = useRef<Record<string, ReturnType<typeof setTimeout>>>({});
+  const sendInFlight = useRef(new Set<string>());
+  const skipScroll = useRef(false);
+  const threadEpoch = useRef(0);
+  const loadedConversation = useRef<string | null>(null);
+
+  useEffect(() => {
+    if (!canSend) return;
+    let active = true;
+    void workspace.replies().then(p => { if (active) setSavedReplies(p.items); }).catch(() => undefined);
+    void workspace.drafts().then(p => {
+      for (const item of p.items) if (!(item.destinationKey in draftCache.current)) draftCache.current[item.destinationKey] = item.body;
+      const key = activeDraftKey.current;
+      if (active && key && draftCache.current[key]) setDraft(draftCache.current[key]);
+    }).catch(() => undefined);
+    return () => { active = false; };
+    // Drafts are hydrated once. Subsequent typing owns the cached value.
+  }, [canSend]);
+
+  useEffect(() => {
+    activeDraftKey.current = selectedKey;
+    setPending([]);
+    setDraft(selectedKey ? draftCache.current[selectedKey] || '' : '');
+    setThreadSearch('');
+    setQuoted(null);
+  }, [selectedKey]);
+
+  function updateDraft(body: string) {
+    setDraft(body);
+    if (!selectedKey) return;
+    draftCache.current[selectedKey] = body;
+    clearTimeout(draftTimers.current[selectedKey]);
+    const key = selectedKey;
+    draftTimers.current[key] = setTimeout(() => { void workspace.draft(key, body).catch(() => toast.error('Your draft could not be saved. Keep this tab open and try again.')); }, 600);
+  }
 
   useEffect(() => {
     void whatsapp
@@ -178,6 +228,17 @@ export function ConversationsPage() {
     [destinations, selectedKey],
   );
 
+  useEffect(() => {
+    if (!requestedConversation || deepLinkDone.current === requestedConversation) return;
+    const found = destinations.find(d => d.conversation?.id === requestedConversation);
+    if (found) { deepLinkDone.current = requestedConversation; setSelectedKey(found.key); return; }
+    if (!listLoading) {
+      void conversationsApi.get(requestedConversation).then(c => setConversationRows(rows => rows.some(r => r.id === c.id) ? rows : [c, ...rows])).catch(e => {
+        deepLinkDone.current = requestedConversation; toast.error(errorMessage(e, 'Conversation could not be opened.'));
+      });
+    }
+  }, [requestedConversation, destinations, listLoading, toast]);
+
   /**
    * Which account a message to this destination leaves from.
    *
@@ -211,10 +272,12 @@ export function ConversationsPage() {
             : { ready: false, reason: `${sendingAccount.name} is not connected — ${sendingAccount.statusText}` };
 
   const loadThread = useCallback(async (target: Destination) => {
+    const epoch = ++threadEpoch.current;
     setThreadError(null);
-    setPending([]);
 
     if (!target.conversation) {
+      loadedConversation.current = null;
+      setOlderCursor(null); setOlderCursorId(null);
       // Nothing has been said yet. That is a real state, not a failure.
       setSelected(null);
       setThread([]);
@@ -230,8 +293,13 @@ export function ConversationsPage() {
           decisionsApi.list({ conversationId: target.conversation.id, limit: 100 }).catch(() => null),
         ]);
 
+        if (epoch !== threadEpoch.current) return;
+
         setSelected(conversation);
-        setThread([...messagePage.items].reverse());
+        const same = loadedConversation.current === conversation.id;
+        loadedConversation.current = conversation.id;
+        setThread(current => same && current ? [...new Map([...current, ...messagePage.items].map(m => [m.id, m])).values()].sort((a,b) => a.sentAt.localeCompare(b.sentAt) || a.id.localeCompare(b.id)) : [...messagePage.items].reverse());
+        if (!same) { setOlderCursor(messagePage.nextCursor); setOlderCursorId(messagePage.nextCursorId); }
 
         // Which replies the decision engine produced, so an automated answer is never shown as if a
         // person wrote it.
@@ -240,24 +308,38 @@ export function ConversationsPage() {
         );
         setDecision(decisionPage?.items?.[0] ?? null);
 
-        setCustomer(conversation.customerId ? await customersApi.get(conversation.customerId).catch(() => null) : null);
-        setGroupFlags(conversation.groupId ? await groupsApi.get(conversation.groupId).catch(() => null) : null);
+        const [customerRow, flags] = await Promise.all([
+          conversation.customerId ? customersApi.get(conversation.customerId).catch(() => null) : Promise.resolve(null),
+          conversation.groupId ? groupsApi.get(conversation.groupId).catch(() => null) : Promise.resolve(null),
+        ]);
+        if (epoch !== threadEpoch.current) return;
+        setCustomer(customerRow); setGroupFlags(flags);
       } catch (failure) {
+        if (epoch !== threadEpoch.current) return;
         setThreadError(errorMessage(failure, 'This conversation could not be loaded.'));
       }
     }
 
-    setParticipants(
-      target.groupId ? ((await groupsApi.participants(target.groupId).catch(() => null))?.items ?? null) : null,
-    );
-    setStops((await settingsApi.featureFlags().catch(() => null))?.emergencyStops ?? null);
+    const [participantPage, flags] = await Promise.all([
+      target.groupId ? groupsApi.participants(target.groupId).catch(() => null) : Promise.resolve(null),
+      settingsApi.featureFlags().catch(() => null),
+    ]);
+    if (epoch !== threadEpoch.current) return;
+    setParticipants(participantPage?.items ?? null);
+    setStops(flags?.emergencyStops ?? null);
   }, []);
 
   const destinationKey = destination?.key;
   const conversationId = destination?.conversation?.id;
 
   useEffect(() => {
-    if (destination) void loadThread(destination);
+    if (destination) {
+      if (destination.conversation?.id !== loadedConversation.current) {
+        setSelected(null); setThread(null); setCustomer(null); setParticipants(null);
+        setOlderCursor(null); setOlderCursorId(null);
+      }
+      void loadThread(destination);
+    }
     // Keyed on the destination identity, not the object: the merge rebuilds it on every refetch.
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [destinationKey, loadThread]);
@@ -272,38 +354,62 @@ export function ConversationsPage() {
 
   const scrollRef = useRef<HTMLDivElement>(null);
   useEffect(() => {
+    if (skipScroll.current) { skipScroll.current = false; return; }
     scrollRef.current?.scrollTo({ top: scrollRef.current.scrollHeight });
   }, [thread, pending]);
 
   async function send(body: string, retryOf?: number) {
     if (!destination || !body.trim()) return;
+    if (sendInFlight.current.has(destination.key)) return;
     if (!sendingAccountId) {
       toast.error('Choose which WhatsApp account this message should be sent from.');
       return;
     }
 
+    sendInFlight.current.add(destination.key);
     const id = retryOf ?? Date.now();
+    const idempotencyKey = (retryOf ? pending.find(p => p.id === retryOf)?.idempotencyKey : undefined) ?? crypto.randomUUID();
+    const quotedExternalId = retryOf ? pending.find(p => p.id === retryOf)?.quotedExternalId : quoted?.externalId;
     setPending((current) =>
       retryOf
         ? current.map((item) => (item.id === retryOf ? { ...item, state: 'sending', error: undefined } : item))
-        : [...current, { id, body, state: 'sending' }],
+        : [...current, { id, body, idempotencyKey, quotedExternalId, state: 'sending' }],
     );
-    if (!retryOf) setDraft('');
+    if (!retryOf) updateDraft('');
+    setQuoted(null);
 
     try {
       await messagesApi.send({
         channelAccountId: sendingAccountId,
         externalConversationId: destination.externalId,
         body: body.trim(),
+        idempotencyKey,
+        quotedExternalId,
       });
       setPending((current) => current.filter((item) => item.id !== id));
       toast.success('Message queued for sending.');
       await loadDirectory();
-      if (destination.conversation) await loadThread(destination);
+      if (destination.conversation && activeDraftKey.current === destination.key) await loadThread(destination);
     } catch (failure) {
       const message = errorMessage(failure, 'The message could not be queued.');
       setPending((current) => current.map((item) => (item.id === id ? { ...item, state: 'failed', error: message } : item)));
+    } finally {
+      sendInFlight.current.delete(destination.key);
     }
+  }
+
+  async function loadOlder() {
+    if (!selected || !olderCursor || loadingOlder) return;
+    setLoadingOlder(true);
+    try {
+      const epoch = threadEpoch.current;
+      const page = await conversationsApi.messages(selected.id, { before: olderCursor, beforeId: olderCursorId || undefined, limit: 80 });
+      if (epoch !== threadEpoch.current) return;
+      skipScroll.current = true;
+      setThread(current => { const ids = new Set((current || []).map(m => m.id)); return [...page.items.filter(m => !ids.has(m.id)).reverse(), ...(current || [])]; });
+      setOlderCursor(page.nextCursor);
+      setOlderCursorId(page.nextCursorId);
+    } catch (e) { toast.error(errorMessage(e, 'Could not load earlier messages.')); } finally { setLoadingOlder(false); }
   }
 
   async function changeStatus(status: ConversationStatusValue) {
@@ -543,7 +649,8 @@ export function ConversationsPage() {
                   />
                 )}
 
-                {thread?.map((message, index) => {
+                {olderCursor && <button disabled={loadingOlder} onClick={() => void loadOlder()}>{loadingOlder ? 'Loading…' : 'Load earlier messages'}</button>}
+                {thread?.filter(m => !threadSearch || (m.body || '').toLowerCase().includes(threadSearch.toLowerCase())).map((message, index) => {
                   const previous = thread[index - 1];
                   const showDay =
                     !previous || new Date(previous.sentAt).toDateString() !== new Date(message.sentAt).toDateString();
@@ -563,9 +670,10 @@ export function ConversationsPage() {
                   return (
                     <div key={message.id}>
                       {showDay && <div className="thread-day">{dayLabel(message.sentAt)}</div>}
-                      <div className={`msg-row ${message.direction === 'OUTBOUND' ? 'outbound' : 'inbound'}`}>
+                      <div id={`message-${message.id}`} className={`msg-row ${message.direction === 'OUTBOUND' ? 'outbound' : 'inbound'}`}>
                         <div className={`msg-bubble${automated ? ' automated' : ''}`} style={{ overflowWrap: 'anywhere' }}>
-                          {message.contentType === 'TEXT' ? (message.body ?? '') : `[${humanise(message.contentType)}]`}
+                          {message.quotedExternalId && <div className="message-quote"><span>Quoted message</span>{(() => { const original = thread?.find(m => m.externalId === message.quotedExternalId); return original ? <a href={`#message-${original.id}`}>{original.body?.slice(0, 150) || humanise(original.contentType)}</a> : <small>Original message is outside the loaded history.</small>; })()}</div>}
+                          {message.contentType === 'TEXT' ? <MessageText body={message.body ?? ''} /> : `[${humanise(message.contentType)}]`}
                           <div className="msg-meta">
                             {message.direction === 'INBOUND'
                               ? (message.senderDisplayName ?? 'Customer')
@@ -575,6 +683,7 @@ export function ConversationsPage() {
                             {' · '}
                             <RelativeTime value={message.sentAt} />
                             {message.deliveryStatus ? ` · ${humanise(message.deliveryStatus)}` : ''}
+                            {canSend && message.externalId && <button className="message-reply" onClick={() => setQuoted(message)} aria-label={`Reply to message from ${message.senderDisplayName || 'sender'}`}>Reply</button>}
                           </div>
                         </div>
                       </div>
@@ -622,6 +731,12 @@ export function ConversationsPage() {
               )}
 
               {canSend && (
+                quoted && <div className="composer-quote"><div><strong>Replying to {quoted.senderDisplayName || 'message'}</strong><p>{quoted.body?.slice(0,150) || humanise(quoted.contentType)}</p></div><button aria-label="Cancel quoted reply" onClick={() => setQuoted(null)}>×</button></div>
+              )}
+              {canSend && (
+                <div className="composer-tools"><select aria-label="Insert saved reply" value="" onChange={e => { const reply = savedReplies.find(r => r.id === e.target.value); if (reply) updateDraft(draft ? `${draft}\n${reply.body}` : reply.body); }}><option value="">Saved replies…</option>{savedReplies.map(r => <option key={r.id} value={r.id}>{r.title}</option>)}</select><Link to="/saved-replies" className="small">Manage replies</Link><input aria-label="Search loaded messages" placeholder="Search loaded messages…" value={threadSearch} onChange={e => setThreadSearch(e.target.value)} /></div>
+              )}
+              {canSend && (
                 <div className="thread-compose">
                   <textarea
                     rows={2}
@@ -632,7 +747,8 @@ export function ConversationsPage() {
                     }
                     value={draft}
                     disabled={!sendability.ready}
-                    onChange={(e) => setDraft(e.target.value)}
+                    onChange={(e) => updateDraft(e.target.value)}
+                    maxLength={8000}
                     onKeyDown={(event) => {
                       if (event.key === 'Enter' && !event.shiftKey) {
                         event.preventDefault();

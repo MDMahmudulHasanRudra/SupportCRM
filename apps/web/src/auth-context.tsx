@@ -61,7 +61,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   }, []);
 
   const can = useCallback(
-    (permission: string) => user?.permissions.includes(permission) ?? false,
+    (permission: string) => user?.isSuperAdmin === true || (user?.permissions.includes(permission) ?? false),
     [user],
   );
 

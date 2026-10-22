@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useState, type FormEvent } from 'react';
+import { Link } from 'react-router-dom';
 import {
   customers as customersApi,
   type Customer,
@@ -168,7 +169,7 @@ export function CustomersPage() {
             <>
               <Card
                 title={detail.displayName}
-                actions={<Badge tone={detail.status === 'ACTIVE' ? 'ok' : 'neutral'}>{humanise(detail.status)}</Badge>}
+                  actions={<><Link to={`/customers/${detail.id}`} className="small">Client 360° ↗</Link><Badge tone={detail.status === 'ACTIVE' ? 'ok' : 'neutral'}>{humanise(detail.status)}</Badge></>}
               >
                 <div className="form-grid">
                   <div>

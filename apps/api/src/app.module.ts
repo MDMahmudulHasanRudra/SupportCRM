@@ -34,6 +34,7 @@ import { RbacModule } from './modules/rbac/rbac.module';
 import { PermissionsGuard } from './modules/rbac/permissions.guard';
 import { RealtimeModule } from './modules/realtime/realtime.module';
 import { SettingsModule } from './modules/settings/settings.module';
+import { WorkspaceModule } from './modules/workspace/workspace.module';
 
 /**
  * The modular monolith (`PROJECT_SPEC.md` §120).
@@ -105,6 +106,7 @@ import { SettingsModule } from './modules/settings/settings.module';
     MetricsModule,
     AuditModule,
     SettingsModule,
+    WorkspaceModule,
     AuthModule,
     RbacModule,
     RealtimeModule,

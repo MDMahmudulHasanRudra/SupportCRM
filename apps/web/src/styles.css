@@ -1366,3 +1366,43 @@ th.num, td.num { text-align: right; font-variant-numeric: tabular-nums; }
   .day-date { min-width: 0; }
   .day-groups { padding-left: var(--space-1); }
 }
+
+/* Secondary figures under the headline cards. One line, no card chrome — these are real numbers
+   that should stay reachable without competing with the four above them. */
+.stat-strip {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px 26px;
+  padding: 11px 16px;
+  margin-top: 10px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  background: var(--surface);
+}
+.strip-figure { display: flex; align-items: baseline; gap: 7px; }
+.strip-figure strong { font-size: 15px; font-variant-numeric: tabular-nums; }
+/* The qualifier drops away when there is no room for it; the label alone still reads correctly. */
+@media (max-width: 900px) { .strip-hint { display: none; } }
+
+/* The row expander. A quiet control — it opens a detail line, it is not an action. */
+.row-expand {
+  background: none;
+  border-color: transparent;
+  color: var(--text-muted);
+  padding: 2px 7px;
+  line-height: 1;
+  font-size: 13px;
+}
+.row-expand:hover { background: var(--surface-2); color: var(--text); }
+tr.row-open > td { border-bottom-color: transparent; }
+
+/* The detail line itself. Tinted so it reads as belonging to the row above rather than as a
+   sibling row of the table. */
+tr.row-detail > td { background: var(--surface-2); padding: 12px 14px 14px; }
+.detail-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(150px, 1fr));
+  gap: 12px 22px;
+}
+.detail-figure { display: flex; flex-direction: column; gap: 3px; }
+.detail-figure strong { font-variant-numeric: tabular-nums; overflow-wrap: anywhere; }

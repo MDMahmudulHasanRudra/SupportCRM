@@ -103,6 +103,7 @@ export interface SessionUser {
   name: string;
   roles: string[];
   permissions: string[];
+  isSuperAdmin?: boolean;
 }
 
 /**
@@ -169,6 +170,8 @@ export const whatsapp = {
   reconnect: (id: string) => api.post<unknown>(`/channels/whatsapp/accounts/${id}/reconnect`),
 
   disconnect: (id: string) => api.post<unknown>(`/channels/whatsapp/accounts/${id}/disconnect`),
+  logoutAccount: (id: string) => api.post<unknown>(`/channels/whatsapp/accounts/${id}/logout`, { confirm: 'LOGOUT' }),
+  setPrimary: (id: string) => api.post<unknown>(`/channels/whatsapp/accounts/${id}/primary`),
 
   /** The current pairing code, for a client that opened the dialog after the push went out. */
   qr: (id: string) => api.get<QrPayload>(`/channels/whatsapp/accounts/${id}/qr`),
@@ -1427,14 +1430,16 @@ export interface RoleRow {
   key: string;
   name: string;
   description: string | null;
-  permissions?: Array<{ key: string; description?: string | null }>;
+  isSuperAdmin: boolean;
+  permissions: string[];
 }
 
 export interface PermissionRow {
   id: string;
   key: string;
-  category: string | null;
-  description: string | null;
+  label: string;
+  category: string;
+  description?: string | null;
 }
 
 export const rbac = {
@@ -1929,6 +1934,8 @@ export type MessageDirectionValue = 'INBOUND' | 'OUTBOUND';
 
 export interface ConversationMessage {
   id: string;
+  externalId: string;
+  quotedExternalId?: string | null;
   direction: MessageDirectionValue;
   contentType: string;
   body: string | null;
@@ -1962,11 +1969,12 @@ export const conversations = {
     return api.get<{ items: Conversation[]; total: number }>(`/conversations?${query.toString()}`);
   },
   get: (id: string) => api.get<ConversationWithTags>(`/conversations/${id}`),
-  messages: (id: string, params: { limit?: number; before?: string } = {}) => {
+  messages: (id: string, params: { limit?: number; before?: string; beforeId?: string } = {}) => {
     const query = new URLSearchParams();
     query.set('limit', String(params.limit ?? 50));
     if (params.before) query.set('before', params.before);
-    return api.get<{ items: ConversationMessage[]; hasMore: boolean; nextCursor: string | null }>(
+    if (params.beforeId) query.set('beforeId', params.beforeId);
+    return api.get<{ items: ConversationMessage[]; hasMore: boolean; nextCursor: string | null; nextCursorId: string | null }>(
       `/conversations/${id}/messages?${query.toString()}`,
     );
   },

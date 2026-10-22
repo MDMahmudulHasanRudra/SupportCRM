@@ -1,0 +1,97 @@
+/* Indigo Workspace: the single palette contract for all operator screens. */
+:root {
+  --bg: #0c1322;
+  --surface: #141e30;
+  --surface-2: #1b2940;
+  --surface-3: #23334d;
+  --border: #2a3850;
+  --border-strong: #3b4d6b;
+  --text: #edf2fc;
+  --text-muted: #a6b5cb;
+  --text-faint: #8b9bb4;
+  --accent: #a5adff;
+  --accent-hover: #b9bfff;
+  --accent-fill: #5b5eea;
+  --accent-fill-hover: #5558dd;
+  --accent-soft: #262d50;
+  --accent-text: #ffffff;
+  --blue: #82b4ff;
+  --orange: #f5ad7b;
+  --ok: #55d4a1;
+  --warn: #f3be66;
+  --danger: #fc8fa5;
+  --sidebar-bg: #101929;
+  --sidebar-text: #a9b8cf;
+  --sidebar-active: #ffffff;
+  --sidebar-selected: #303963;
+  --sidebar-border: #233149;
+  --hero-bg: #1c2542;
+  --hero-text: #edf2fc;
+  --hero-muted: #aebbd6;
+  --hero-glow: #6366f1;
+  --qr-paper: #ffffff;
+  --qr-ink: #17233b;
+  --shadow-sm: 0 2px 4px rgb(0 0 0 / 8%);
+  --shadow: 0 5px 22px rgb(0 0 0 / 12%);
+  --shadow-lg: 0 24px 80px rgb(0 0 0 / 35%);
+  --radius: 16px;
+  --radius-sm: 10px;
+  --fs-base: 14px;
+  --fs-xl: 28px;
+  --fs-2xl: 32px;
+  color-scheme: dark;
+}
+@media (prefers-color-scheme: light) {
+  :root:not([data-theme='dark']) {
+    --bg: #f5f7fb;
+    --surface: #ffffff;
+    --surface-2: #f8fafd;
+    --surface-3: #eef2f9;
+    --border: #e5eaf3;
+    --border-strong: #ccd6e6;
+    --text: #17233b;
+    --text-muted: #5e6d85;
+    --text-faint: #647188;
+    --accent: #4f46e5;
+    --accent-hover: #4338ca;
+    --accent-fill: #4f46e5;
+    --accent-fill-hover: #4338ca;
+    --accent-soft: #eeedff;
+    --blue: #2563c7;
+    --orange: #b45a14;
+    --ok: #047857;
+    --warn: #9a570a;
+    --danger: #c42a46;
+    --sidebar-bg: #111b2e;
+    --shadow-sm: 0 2px 4px rgb(23 35 59 / 2%);
+    --shadow: 0 6px 26px rgb(23 35 59 / 5%);
+    --shadow-lg: 0 24px 80px rgb(23 35 59 / 18%);
+    color-scheme: light;
+  }
+}
+:root[data-theme='light'] {
+  --bg: #f5f7fb;
+  --surface: #ffffff;
+  --surface-2: #f8fafd;
+  --surface-3: #eef2f9;
+  --border: #e5eaf3;
+  --border-strong: #ccd6e6;
+  --text: #17233b;
+  --text-muted: #5e6d85;
+  --text-faint: #647188;
+  --accent: #4f46e5;
+  --accent-hover: #4338ca;
+  --accent-fill: #4f46e5;
+  --accent-fill-hover: #4338ca;
+  --accent-soft: #eeedff;
+  --blue: #2563c7;
+  --orange: #b45a14;
+  --ok: #047857;
+  --warn: #9a570a;
+  --danger: #c42a46;
+  --sidebar-bg: #111b2e;
+  --shadow-sm: 0 2px 4px rgb(23 35 59 / 2%);
+  --shadow: 0 6px 26px rgb(23 35 59 / 5%);
+  --shadow-lg: 0 24px 80px rgb(23 35 59 / 18%);
+  color-scheme: light;
+}

@@ -141,9 +141,33 @@ export class ReportsService {
    * the average rather than counted as zero — an unanswered conversation is not a fast one.
    */
   private async responseTimes(window: DateWindow) {
-    const firstResponse = await this.conversations.manager.query<Array<{ avg_seconds: string | null }>>(
+    /*
+     * Time to first response, over conversations where that is a measurable thing.
+     *
+     * `first_out.sent_at > c."createdAt"` is the load-bearing condition, and it is not defensive
+     * padding. An outbound message can legitimately predate its own conversation: messages sent
+     * before the conversation resolver existed were stored without a `conversationId`, and the
+     * orphan backfill later attached them to a conversation that a *newer* message had created. One
+     * such row is in this database — sent 17:29, attached to a conversation created 17:54 — and it
+     * produced an average "first response" of **minus 25 minutes**.
+     *
+     * Filtering rather than clamping, because a negative interval is not a fast response to be
+     * floored at zero. It is a pair of timestamps whose difference does not describe a response at
+     * all, and averaging it in silently drags the figure down even when the result stays positive —
+     * which is worse than an obviously wrong number, because it looks plausible.
+     *
+     * `measured` and `skipped` come back alongside, so the average can be read as "over N
+     * conversations" rather than taken on faith.
+     */
+    const firstResponse = await this.conversations.manager.query<
+      Array<{ avg_seconds: string | null; measured: string; skipped: string }>
+    >(
       `
-      SELECT AVG(EXTRACT(EPOCH FROM (first_out.sent_at - c."createdAt"))) AS avg_seconds
+      SELECT
+        AVG(EXTRACT(EPOCH FROM (first_out.sent_at - c."createdAt")))
+          FILTER (WHERE first_out.sent_at > c."createdAt")                         AS avg_seconds,
+        COUNT(*) FILTER (WHERE first_out.sent_at > c."createdAt")                   AS measured,
+        COUNT(*) FILTER (WHERE first_out.sent_at <= c."createdAt")                  AS skipped
       FROM conversations c
       JOIN LATERAL (
         SELECT MIN(m."sentAt") AS sent_at
@@ -169,6 +193,9 @@ export class ReportsService {
 
     return {
       firstResponseSeconds: seconds(firstResponse[0]?.avg_seconds),
+      /** How many conversations the average is over, and how many could not be measured. */
+      firstResponseMeasured: Number(firstResponse[0]?.measured ?? 0),
+      firstResponseSkipped: Number(firstResponse[0]?.skipped ?? 0),
       resolutionSeconds: seconds(resolution[0]?.avg_seconds),
     };
   }

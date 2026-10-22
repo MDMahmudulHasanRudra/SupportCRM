@@ -5,7 +5,31 @@ built on the [OpenWA](https://github.com/rmyndharis/OpenWA) gateway.
 
 `PROJECT_SPEC.md` is the canonical specification. Nothing in this repository overrides it.
 
-## Status — Phase 3 (CRM domain) complete
+The active documentation system separates [business requirements](docs/01-BRD.md),
+[product requirements](docs/02-PRD.md), [technical requirements](docs/03-TRD.md),
+[architecture](docs/04-SYSTEM-ARCHITECTURE.md), [app flow](docs/05-APP-FLOW.md),
+[UI/UX design](docs/06-UI-UX-DESIGN.md), [database schema](docs/07-DATABASE-SCHEMA.md),
+[API contracts](docs/08-API-CONTRACTS.md), [implementation phases](docs/09-IMPLEMENTATION-PLAN.md)
+and [testing/deployment](docs/10-TESTING-DEPLOYMENT.md). Run `pnpm docs:check`
+and `pnpm design:check` to verify reference drift and core theme contrast.
+
+## Implementation status
+
+Local source preview on Windows: run `./scripts/start-local.ps1` from PowerShell, then open
+[Support CRM](http://localhost:12000). It builds current source and starts the real API, worker,
+database, Redis, web proxy and WhatsApp gateway using `docker-compose.preview.yml` with read-only
+compiled-source mounts. First launch builds missing images; use `-RebuildImages` after dependency
+changes. This preview binds the web port to localhost. Production keeps the existing image-based
+deployment below. Sign in with the administrator account configured in `.env`.
+
+`pnpm test:browser` runs the local read-only desktop/mobile smoke suite. The real gateway QR check
+requires explicit `CRM_E2E_PAIRING=1`, an empty local account list and the test named `real gateway QR`.
+It stops its unpaired session, retains its CRM account, and never scans a phone or stores QR material.
+
+The console now includes an operations overview, Client 360°, billing/subscriptions,
+team scheduling/leave, saved replies, notifications, job monitoring, user administration
+and release notes. [Setup and migration](docs/WORKSPACE_RELEASE.md) ·
+[23-module feature audit and remaining work](docs/FEATURE_AUDIT_2026-10-22.md).
 
 | Phase | Scope | Status |
 |---|---|---|
@@ -13,8 +37,10 @@ built on the [OpenWA](https://github.com/rmyndharis/OpenWA) gateway.
 | 1 | Database, auth, RBAC, audit, settings, channel contract, jobs, realtime, health | ✅ [report](docs/PHASE_1_REPORT.md) |
 | 2 | WhatsApp — OpenWA adapter, sessions, webhooks, messages, groups, outbound | ✅ [report](docs/PHASE_2_REPORT.md) |
 | 3 | CRM — customers, identities, conversations + state, assignment, takeover | ✅ [report](docs/PHASE_3_REPORT.md) |
-| 4 | Knowledge base — articles, documents, chunking, embeddings, retrieval | ⏳ next |
-| 5–11 | Automation, AI, escalation, scale, analytics, copilot, hardening | planned |
+| 4 | Knowledge base — articles, documents, chunking, embeddings, retrieval | Implemented; provider acceptance remains environment-dependent |
+| 5–10 | Automation, AI, escalation, scale, analytics, copilot | Implemented in API/worker and console; see the current feature audit for limits |
+| Workspace expansion | Billing, subscriptions, scheduling, notifications, replies, releases, access management | Implemented; new migration required |
+| Hardening and full inventory parity | Live-channel verification, media, optional channels, project tenancy and other listed gaps | Incomplete; tracked in the current feature audit |
 
 A real-gateway validation was run against an isolated OpenWA instance before Phase 3:
 [report](docs/GATEWAY_VALIDATION_REPORT.md) — 12 pass, 0 fail, 9 blocked on a physical QR scan.

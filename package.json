@@ -8,6 +8,8 @@
   },
   "packageManager": "pnpm@11.9.0",
   "scripts": {
+    "docs:check": "python scripts/sync-reference-docs.py --check",
+    "design:check": "python scripts/check-design-tokens.py",
     "dev:api": "pnpm --filter @support-crm/api start:dev",
     "dev:worker": "pnpm --filter @support-crm/api start:worker:dev",
     "dev:web": "pnpm --filter @support-crm/web dev",
@@ -16,6 +18,7 @@
     "typecheck": "pnpm --filter @support-crm/api typecheck && pnpm --filter @support-crm/web typecheck",
     "test": "pnpm --filter @support-crm/api test && pnpm --filter @support-crm/web test",
     "test:integration": "pnpm --filter @support-crm/api test:integration",
+    "test:browser": "pnpm --filter @support-crm/web test:browser",
     "db:migrate": "pnpm --filter @support-crm/api migration:run",
     "db:revert": "pnpm --filter @support-crm/api migration:revert",
     "db:seed": "pnpm --filter @support-crm/api seed",

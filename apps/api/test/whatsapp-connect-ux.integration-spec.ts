@@ -149,6 +149,41 @@ describe('WhatsApp connect UX (integration)', () => {
   }
 
   // === the one-call connect flow ================================================================
+  describe('explicit device logout and primary account controls', () => {
+    it('requires server confirmation, logs out by gateway UUID and retains the account', async () => {
+      const cookie = await adminCookie();
+      const account = await accounts.register({ channelKey: ChannelKey.WHATSAPP, externalName: 'logout-test', label: 'Logout test' });
+      const state = await adapter.connect(account.id);
+      await accounts.recordState(account, state.status, { source: 'ADMIN_ACTION' as never });
+      await request(ctx.app.getHttpServer()).post(`/api/v1/channels/whatsapp/accounts/${account.id}/logout`).set('Cookie', cookie).send({ confirm: 'wrong' }).expect(400);
+      expect(stub.calls.filter(c => c.path.endsWith('/logout'))).toHaveLength(0);
+      await request(ctx.app.getHttpServer()).post(`/api/v1/channels/whatsapp/accounts/${account.id}/logout`).set('Cookie', cookie).send({ confirm: 'LOGOUT' }).expect(201);
+      const after = await accountRepo.findOneByOrFail({ id: account.id });
+      expect(after.status).toBe(ChannelConnectionState.DISCONNECTED);
+      expect(after.disconnectRequestedAt).not.toBeNull();
+      expect(stub.calls.some(c => c.path === `/api/sessions/${after.externalId}/logout`)).toBe(true);
+      expect(await auditRepo.count({ where: { action: 'channels.logout', success: true } })).toBe(1);
+    });
+    it('never reports incomplete provider logout as success', async () => {
+      const cookie = await adminCookie();
+      const account = await accounts.register({ channelKey: ChannelKey.WHATSAPP, externalName: 'logout-fail', label: 'Logout failure' });
+      await adapter.connect(account.id); stub.logoutFailureStatus = 502;
+      await request(ctx.app.getHttpServer()).post(`/api/v1/channels/whatsapp/accounts/${account.id}/logout`).set('Cookie', cookie).send({ confirm: 'LOGOUT' }).expect(502);
+      expect((await accountRepo.findOneByOrFail({ id: account.id })).status).toBe(ChannelConnectionState.ERROR);
+      expect(await auditRepo.count({ where: { action: 'channels.logout', success: true } })).toBe(0);
+    });
+    it('changes primary atomically and denies read-only operators', async () => {
+      const cookie = await adminCookie();
+      const first = await accounts.register({ channelKey: ChannelKey.WHATSAPP, externalName: 'primary-one', label: 'One', isPrimary: true });
+      const second = await accounts.register({ channelKey: ChannelKey.WHATSAPP, externalName: 'primary-two', label: 'Two' });
+      await request(ctx.app.getHttpServer()).post(`/api/v1/channels/whatsapp/accounts/${second.id}/primary`).set('Cookie', cookie).expect(201);
+      expect(await accountRepo.count({ where: { isPrimary: true } })).toBe(1);
+      expect((await accountRepo.findOneByOrFail({ id: first.id })).isPrimary).toBe(false);
+      await createUser('reader', 'report_viewer'); const reader = await login('reader');
+      await request(ctx.app.getHttpServer()).post(`/api/v1/channels/whatsapp/accounts/${first.id}/primary`).set('Cookie', reader).expect(403);
+      await request(ctx.app.getHttpServer()).post(`/api/v1/channels/whatsapp/accounts/${second.id}/logout`).set('Cookie', reader).send({ confirm: 'LOGOUT' }).expect(403);
+    });
+  });
 
   describe('Connect WhatsApp', () => {
     it('registers and connects in a single call', async () => {

@@ -1,0 +1,22 @@
+# Local source preview: build source with pnpm first. Production uses docker-compose.yml alone.
+# Runtime dependencies and the gateway still come from the real Docker images.
+services:
+  migrate:
+    image: ${COMPOSE_PROJECT_NAME:-supportcrm}-api:latest
+    volumes:
+      - ./apps/api/dist:/app/dist:ro
+  api:
+    image: ${COMPOSE_PROJECT_NAME:-supportcrm}-api:latest
+    environment:
+      CORS_ORIGINS: ${CORS_ORIGINS:-http://localhost:3000},http://localhost:${WEB_PORT:-12000},http://127.0.0.1:${WEB_PORT:-12000}
+    volumes:
+      - ./apps/api/dist:/app/dist:ro
+  worker:
+    image: ${COMPOSE_PROJECT_NAME:-supportcrm}-api:latest
+    volumes:
+      - ./apps/api/dist:/app/dist:ro
+  web:
+    ports: !override
+      - 127.0.0.1:${WEB_PORT:-12000}:80
+    volumes:
+      - ./apps/web/dist:/usr/share/nginx/html:ro

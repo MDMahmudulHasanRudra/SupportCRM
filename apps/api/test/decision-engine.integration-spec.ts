@@ -1085,7 +1085,7 @@ describe('Decision Engine (integration)', () => {
         .set('Cookie', cookie)
         .expect(200);
 
-      expect(response.body.ai).toEqual({ available: true, provider: 'test', model: 'scripted-test' });
+      expect(response.body.ai).toEqual({ available: true, provider: 'test', model: 'scripted-test', source: 'environment' });
       expect(JSON.stringify(response.body)).not.toMatch(/apiKey|secret|token/i);
     });
 

@@ -54,6 +54,7 @@ export interface StubCall {
 }
 
 export class OpenWaStub {
+  logoutFailureStatus: number | null = null;
   private server?: Server;
   private port = 0;
 
@@ -135,6 +136,7 @@ export class OpenWaStub {
   }
 
   reset(): void {
+    this.logoutFailureStatus = null;
     this.calls.length = 0;
     this.sentMessages.length = 0;
     this.sessions.clear();
@@ -243,6 +245,11 @@ export class OpenWaStub {
     }
     if (action === 'stop' && method === 'POST') {
       session.status = 'disconnected';
+      return json(200, session);
+    }
+    if (action === 'logout' && method === 'POST') {
+      if (this.logoutFailureStatus) return json(this.logoutFailureStatus, { code: 'SESSION_LOGOUT_INCOMPLETE' });
+      session.status = 'disconnected'; session.paired = false; session.phone = null;
       return json(200, session);
     }
     if (action === 'qr' && method === 'GET') {

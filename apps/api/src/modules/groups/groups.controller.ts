@@ -70,7 +70,15 @@ export class GroupOperationsQueryDto {
 
   @IsOptional() @IsString() sort?: string;
   @IsOptional() @IsString() direction?: string;
-  @IsOptional() @Type(() => Number) @IsInt() @Min(1) @Max(200) limit?: number;
+  /**
+   * Page size for the operations console.
+   *
+   * Higher than the other list endpoints because this is the screen an operator sweeps and
+   * bulk-selects from, and the row is deliberately narrow — the wide figures live in an expandable
+   * detail line, so a full page is nine cells per row rather than twelve. Measured at this ceiling
+   * before raising it; see `PAGE_SIZES` in the operations page.
+   */
+  @IsOptional() @Type(() => Number) @IsInt() @Min(1) @Max(1000) limit?: number;
   @IsOptional() @Type(() => Number) @IsInt() @Min(0) offset?: number;
 }
 
@@ -142,7 +150,7 @@ export class GroupsController {
 
     return this.operations.list(
       toFilter(query),
-      { limit: Math.min(query.limit ?? 50, 200), offset: Math.max(query.offset ?? 0, 0), sort, direction },
+      { limit: Math.min(query.limit ?? 100, 1000), offset: Math.max(query.offset ?? 0, 0), sort, direction },
     );
   }
 

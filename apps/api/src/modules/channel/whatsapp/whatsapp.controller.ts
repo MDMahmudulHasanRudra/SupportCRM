@@ -1,10 +1,12 @@
 import {
   Body,
+  BadGatewayException,
   ConflictException,
   Controller,
   Get,
   InternalServerErrorException,
   Param,
+  ParseUUIDPipe,
   Post,
   Req,
 } from '@nestjs/common';
@@ -21,7 +23,7 @@ import { IngestionService } from '../../ingestion/ingestion.service';
 import { ChannelAccountService } from '../channel-account.service';
 import { ChannelRecoveryService } from '../channel-recovery.service';
 import { ChannelConnectionState, ConnectionEventSource } from '../channel-connection';
-import { ChannelKey } from '../entities/channel.entity';
+import { Channel, ChannelKey } from '../entities/channel.entity';
 import { Group } from '../../groups/entities/group.entity';
 import { ChannelAccount } from '../entities/channel-account.entity';
 import {
@@ -50,14 +52,17 @@ export class SetOwnershipDto {
   @IsBoolean() enabled!: boolean;
 }
 
+export class ConfirmLogoutDto {
+  @Matches(/^LOGOUT$/) confirm!: string;
+}
+
 /**
  * WhatsApp account and session management (Phase 2 brief §3, §20).
  *
  * Every route here was written only after confirming the corresponding gateway endpoint exists in
  * the vendored source — the brief forbids stubs, and `PROJECT_SPEC.md` §209 forbids calling a
- * stubbed endpoint "implemented". Notably absent: `logout`. The gateway exposes it, but it destroys
- * the device pairing, and one accidental click on a production account would cost a re-scan of a
- * customer's WhatsApp. It stays out until there is a UI with a real confirmation flow.
+ * stubbed endpoint "implemented". Logout is distinct from stopping a session: the web flow and
+ * server both require explicit confirmation because reconnecting after unlink needs another scan.
  */
 @ApiTags('channels')
 @Controller('channels/whatsapp')
@@ -369,6 +374,43 @@ export class WhatsAppController {
 
       return serializeAccount(updated);
     });
+  }
+
+  @Post('accounts/:id/logout')
+  @RequirePermissions('channels.manage')
+  @ApiOperation({ summary: 'Explicitly unlink the device; requires confirm=LOGOUT and a new QR to link again' })
+  async logout(@Param('id', ParseUUIDPipe) id: string, @Body() _dto: ConfirmLogoutDto, @CurrentUser() user: AuthenticatedUser, @Req() request: Request) {
+    return this.accounts.withSessionLock(id, 'logout', async () => {
+      const account = await this.accounts.findOne(id);
+      if (account.channelKey !== ChannelKey.WHATSAPP) throw new ConflictException('This is not a WhatsApp account.');
+      await this.recovery.setOperatorIntent(id, 'disconnect');
+      await this.accounts.recordState(account, ChannelConnectionState.DISCONNECTING, { source: ConnectionEventSource.ADMIN_ACTION, actorId: user.id, detail: 'Device logout requested' });
+      try { await this.adapter.logout(id); }
+      catch {
+        await this.accounts.recordState(await this.accounts.findOne(id), ChannelConnectionState.ERROR, { source: ConnectionEventSource.ADMIN_ACTION, actorId: user.id, detail: 'Device logout could not be confirmed. Reconnect and retry.', capabilities: null });
+        await this.audit.record({ action: 'channels.logout', resource: 'channel_account', resourceId: id, success: false }, this.audit.actorFromRequest(request, user));
+        throw new BadGatewayException('WhatsApp could not confirm device logout. Reconnect this account and try again.');
+      }
+      await this.accountRepo.update(id, { accountPhone: null, capabilities: null, lastError: null });
+      const updated = await this.accounts.recordState(await this.accounts.findOne(id), ChannelConnectionState.DISCONNECTED, { source: ConnectionEventSource.ADMIN_ACTION, actorId: user.id, detail: 'Device logout completed; a fresh QR scan is required', capabilities: null });
+      await this.audit.record({ action: 'channels.logout', resource: 'channel_account', resourceId: id }, this.audit.actorFromRequest(request, user));
+      return serializeAccount(updated);
+    });
+  }
+
+  @Post('accounts/:id/primary')
+  @RequirePermissions('channels.manage')
+  @ApiOperation({ summary: 'Select the primary WhatsApp sending account atomically' })
+  async primary(@Param('id', ParseUUIDPipe) id: string, @CurrentUser() user: AuthenticatedUser, @Req() request: Request) {
+    const account = await this.accounts.findOne(id);
+    if (account.channelKey !== ChannelKey.WHATSAPP) throw new ConflictException('This is not a WhatsApp account.');
+    await this.accountRepo.manager.transaction(async tx => {
+      await tx.findOneOrFail(Channel, { where: { key: ChannelKey.WHATSAPP }, lock: { mode: 'pessimistic_write' } });
+      await tx.update(ChannelAccount, { channelKey: ChannelKey.WHATSAPP, isPrimary: true }, { isPrimary: false });
+      await tx.update(ChannelAccount, id, { isPrimary: true });
+    });
+    await this.audit.record({ action: 'channels.primary_changed', resource: 'channel_account', resourceId: id, after: { isPrimary: true } }, this.audit.actorFromRequest(request, user));
+    return serializeAccount(await this.accounts.findOne(id));
   }
 
   /** Reconnect is stop-then-start, so a wedged session recovers without an operator doing both. */

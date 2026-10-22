@@ -1,5 +1,6 @@
 import request from 'supertest';
 import { Repository } from 'typeorm';
+import { RedisService } from '../src/common/redis/redis.service';
 import { CryptoService } from '../src/common/crypto/crypto.service';
 import { ChannelAccountService } from '../src/modules/channel/channel-account.service';
 import { ChannelConnectionState } from '../src/modules/channel/channel-connection';
@@ -117,6 +118,15 @@ describe('WhatsApp channel (integration)', () => {
 
   beforeEach(async () => {
     await resetDatabase(ctx.dataSource);
+    // These tests reuse one recipient across cases. Database truncation does not reset Redis quotas.
+    const redis = ctx.app.get(RedisService);
+    if (process.env.REDIS_KEY_PREFIX !== 'support-crm-test') throw new Error('Refusing to clear non-test rate limits.');
+    let cursor = '0';
+    do {
+      const page = await redis.getClient().scan(cursor, 'MATCH', redis.key('ratelimit', '*'), 'COUNT', 100);
+      cursor = page[0];
+      if (page[1].length) await redis.getClient().del(...page[1]);
+    } while (cursor !== '0');
     stub.reset();
     ctx.app.get(MetricsService).reset();
 

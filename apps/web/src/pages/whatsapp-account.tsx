@@ -45,7 +45,7 @@ export function WhatsAppAccountPage() {
   const [groupRows, setGroupRows] = useState<WhatsAppGroup[] | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
-  const [confirming, setConfirming] = useState<'disconnect' | 'handback' | null>(null);
+  const [confirming, setConfirming] = useState<'disconnect' | 'handback' | 'logout' | null>(null);
 
   const load = useCallback(async () => {
     try {
@@ -107,6 +107,7 @@ export function WhatsAppAccountPage() {
             <button type="button" onClick={() => void load()} disabled={busy}>
               <IconRefresh size={15} /> Refresh
             </button>
+            {manage && account.canConnect && <Link to={`/channels/whatsapp?connect=${account.id}#pairing`} className="button-link primary">Link account / show QR</Link>}
           </>
         }
       />
@@ -242,6 +243,7 @@ export function WhatsAppAccountPage() {
               but keeps the device link, so it can be started again.
             </p>
 
+            {manage && <div className="row">{!account.isPrimary ? <button disabled={busy} onClick={() => void run('Primary WhatsApp account updated.', () => whatsapp.setPrimary(account.id))}>Set as primary account</button> : <Badge tone="ok">Primary account</Badge>}<button className="danger" disabled={busy || !account.connected} onClick={() => setConfirming('logout')}>Log out device</button></div>}
             <Link to={`/channels/whatsapp/${account.id}/groups`} className="small">
               Manage groups →
             </Link>
@@ -316,6 +318,8 @@ export function WhatsAppAccountPage() {
           onConfirm={() => void run('Disconnected.', () => whatsapp.disconnect(account.id))}
         />
       )}
+
+      {confirming === 'logout' && <ConfirmDialog title="Log out this WhatsApp device?" body={<><p>This unlinks <strong>{account.phoneNumber ?? account.name}</strong> from Support CRM. Linking it again requires a new QR scan.</p><p className="muted small">Stored conversations and customer history are retained. Use Disconnect when you only want to pause the session.</p></>} confirmWord="LOGOUT" confirmLabel="Log out device" busy={busy} onCancel={() => setConfirming(null)} onConfirm={() => void run('Device logout completed. Scan a new QR to link again.', () => whatsapp.logoutAccount(account.id))} />}
 
       {confirming === 'handback' && (
         <ConfirmDialog

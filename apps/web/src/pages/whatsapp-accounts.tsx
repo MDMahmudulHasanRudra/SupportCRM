@@ -1,12 +1,12 @@
-import { useCallback, useEffect, useState } from 'react';
-import { Link } from 'react-router-dom';
+import { useCallback, useEffect, useRef, useState } from 'react';
+import { Link, useSearchParams } from 'react-router-dom';
 import { whatsapp, type WhatsAppAccount } from '../api/client';
 import { onChannelStatus } from '../api/realtime';
 import { useAuth } from '../auth-context';
 import { ConnectPanel } from '../components/connect-panel';
 import { IconAlertCircle, IconMessageCircle, IconPlug, IconRefresh } from '../components/icons';
 import { RelativeTime, StatusBadge } from '../components/status-badge';
-import { Card, Empty, ErrorState, Loading, PageHeader } from '../components/ui';
+import { Card, Empty, ErrorState, Loading, PageHeader, Stat, StatGrid } from '../components/ui';
 
 /**
  * WhatsApp Accounts.
@@ -20,6 +20,9 @@ import { Card, Empty, ErrorState, Loading, PageHeader } from '../components/ui';
  */
 export function WhatsAppAccountsPage() {
   const { can } = useAuth();
+  const [params] = useSearchParams();
+  const requestedAccount = params.get('connect');
+  const openedAccount = useRef<string | null>(null);
   const [accounts, setAccounts] = useState<WhatsAppAccount[] | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [busyId, setBusyId] = useState<string | null>(null);
@@ -72,16 +75,21 @@ export function WhatsAppAccountsPage() {
   const beginPairing = (account: WhatsAppAccount | null) =>
     setTarget((current) => ({ account, key: current.key + 1 }));
 
+  useEffect(() => {
+    if (!manage || !requestedAccount || openedAccount.current === requestedAccount) return;
+    const found = accounts?.find(a => a.id === requestedAccount);
+    if (found) { openedAccount.current = requestedAccount; setTarget(current => ({ account: found, key: current.key + 1 })); }
+  }, [accounts, requestedAccount, manage]);
+
   return (
     <>
       <PageHeader
         title="WhatsApp accounts"
         description="The WhatsApp numbers Support CRM handles messages for."
         actions={
-          manage &&
-          target.account !== null && (
-            <button type="button" onClick={() => beginPairing(null)}>
-              Connect another number
+          manage && (
+            <button type="button" className="primary" onClick={() => { beginPairing(null); requestAnimationFrame(() => { document.getElementById('pairing')?.scrollIntoView({ block: 'center', behavior: 'auto' }); document.getElementById('whatsapp-account-name')?.focus(); }); }}>
+              + Add WhatsApp account
             </button>
           )
         }
@@ -89,7 +97,10 @@ export function WhatsAppAccountsPage() {
 
       {error && <ErrorState message={error} onRetry={() => void load()} icon={<IconAlertCircle size={20} />} />}
 
-      <div className="wa-grid">
+      <div className="channel-onboarding"><div className="channel-onboarding-intro"><span><IconMessageCircle size={23} /></span><div><h2>Your conversations start here</h2><p>Connect a support number and manage it without leaving your workspace.</p></div></div><div className="channel-onboarding-steps"><span><b>1</b> Add account</span><span aria-hidden="true">→</span><span><b>2</b> Scan QR</span><span aria-hidden="true">→</span><span><b>3</b> Start supporting</span></div></div>
+      <StatGrid><Stat label="Support accounts" value={accounts?.length ?? null} hint="Numbers in this workspace" icon={<IconMessageCircle size={18} />} /><Stat label="Connected" value={accounts ? accounts.filter(a => a.connected).length : null} hint="Ready to receive messages" icon={<IconPlug size={18} />} iconColor="ok" /><Stat label="Needs attention" value={accounts ? accounts.filter(a => !a.connected).length : null} hint="Review connection status below" icon={<IconAlertCircle size={18} />} iconColor="warn" /></StatGrid>
+
+      <div className="wa-grid" style={{ marginTop: 24 }}>
         {/* --- the accounts themselves ------------------------------------------------------- */}
         <Card title="Your accounts">
           {accounts === null ? (
@@ -102,7 +113,7 @@ export function WhatsAppAccountsPage() {
             />
           ) : (
             accounts.map((account) => (
-              <div key={account.id} className="stack" style={{ gap: 10 }}>
+              <div key={account.id} className="stack wa-account-card" style={{ gap: 13 }}>
                 <div className="wa-account">
                   <span className={account.connected ? 'wa-avatar' : 'wa-avatar off'}>
                     <IconMessageCircle size={18} />

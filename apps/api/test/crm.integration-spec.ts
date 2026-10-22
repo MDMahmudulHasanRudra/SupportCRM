@@ -843,6 +843,21 @@ describe('CRM domain (integration)', () => {
   // === criterion 11: pagination ==================================================================
 
   describe('history and pagination', () => {
+    it('keeps messages with the same timestamp across cursor boundaries', async () => {
+      const timestamp = Math.floor(Date.now() / 1000);
+      for (let i = 0; i < 12; i++) await deliver(incoming({ id: `SAME_TIME_${i}`, timestamp }));
+      const target = await conversationRepo.findOneOrFail({ where: {} });
+      const allIds: string[] = [];
+      let before: Date | undefined; let beforeId: string | undefined;
+      for (let i = 0; i < 3; i++) {
+        const page = await conversations.listMessages(target.id, { limit: 5, before, beforeId });
+        allIds.push(...page.items.map(m => m.id));
+        before = page.nextCursor ? new Date(page.nextCursor) : undefined;
+        beforeId = page.nextCursorId || undefined;
+      }
+      expect(allIds).toHaveLength(12);
+      expect(new Set(allIds).size).toBe(12);
+    });
     it('paginates message history with a cursor', async () => {
       for (let i = 0; i < 12; i++) {
         await deliver(incoming({ id: `PAGE_${i}`, timestamp: Math.floor(Date.now() / 1000) + i }));

@@ -94,13 +94,13 @@ export function PageHeader({
   actions?: ReactNode;
 }) {
   return (
-    <>
+    <header className="page-header">
       <div className="page-head">
-        <h1>{title}</h1>
-        {actions && <div className="row">{actions}</div>}
+        <div className="page-title-group"><span className="page-title-marker" aria-hidden="true" /><h1>{title}</h1></div>
+        {actions && <div className="row page-actions">{actions}</div>}
       </div>
       {description && <p className="page-sub">{description}</p>}
-    </>
+    </header>
   );
 }
 
@@ -182,9 +182,9 @@ export function Card({ title, children, actions }: { title?: string; children: R
   return (
     <div className="card card-pad stack">
       {(title || actions) && (
-        <div className="row" style={{ justifyContent: 'space-between' }}>
-          {title && <strong>{title}</strong>}
-          {actions}
+        <div className="card-header">
+          {title && <h2 className="card-title">{title}</h2>}
+          {actions && <div className="card-actions">{actions}</div>}
         </div>
       )}
       {children}

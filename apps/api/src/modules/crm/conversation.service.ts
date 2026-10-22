@@ -95,6 +95,7 @@ export class ConversationService {
     controlState?: ConversationControlState;
     unassignedOnly?: boolean;
     pinnedOnly?: boolean;
+    activeOnly?: boolean;
     search?: string;
     limit?: number;
     offset?: number;
@@ -108,6 +109,7 @@ export class ConversationService {
       .addOrderBy('c.lastMessageAt', 'DESC', 'NULLS LAST');
 
     if (options.status) qb.andWhere('c.status = :status', { status: options.status });
+    if (options.activeOnly) qb.andWhere('c.status NOT IN (:...closed)', { closed: [ConversationStatus.RESOLVED, ConversationStatus.CLOSED] });
     if (options.kind) qb.andWhere('c.kind = :kind', { kind: options.kind });
     if (options.customerId) qb.andWhere('c.customerId = :customerId', { customerId: options.customerId });
     if (options.channelAccountId) {
@@ -207,7 +209,7 @@ export class ConversationService {
    */
   async listMessages(
     conversationId: string,
-    options: { limit?: number; before?: Date } = {},
+    options: { limit?: number; before?: Date; beforeId?: string } = {},
   ) {
     await this.findOne(conversationId);
     const limit = Math.min(options.limit ?? 50, 200);
@@ -216,9 +218,12 @@ export class ConversationService {
       .createQueryBuilder('m')
       .where('m.conversationId = :id', { id: conversationId })
       .orderBy('m.sentAt', 'DESC')
+      .addOrderBy('m.id', 'DESC')
       .take(limit + 1); // one extra to detect another page without a second COUNT
 
-    if (options.before) qb.andWhere('m.sentAt < :before', { before: options.before });
+    if (options.before && options.beforeId) {
+      qb.andWhere('(m.sentAt < :before OR (m.sentAt = :before AND m.id < :beforeId))', { before: options.before, beforeId: options.beforeId });
+    } else if (options.before) qb.andWhere('m.sentAt < :before', { before: options.before });
 
     const rows = await qb.getMany();
     const hasMore = rows.length > limit;
@@ -228,6 +233,7 @@ export class ConversationService {
       items,
       hasMore,
       nextCursor: hasMore ? items[items.length - 1].sentAt.toISOString() : null,
+      nextCursorId: hasMore ? items[items.length - 1].id : null,
     };
   }
 
@@ -580,6 +586,12 @@ export class ConversationService {
         assignedToTeamId: target.teamId ?? null,
         assignedAt: new Date(),
       });
+
+      if (target.userId) {
+        await manager.query(`INSERT INTO workspace_notifications ("userId",title,body,href)
+          VALUES ($1,$2,$3,$4)`, [target.userId, 'A conversation is assigned to you',
+          'Open your support queue to review and reply.', `/conversations?conversation=${id}`]);
+      }
     });
 
     const updated = await this.findOne(id);

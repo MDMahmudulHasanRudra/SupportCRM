@@ -1,66 +1,53 @@
-import { useEffect, useRef, useState, type ReactNode } from 'react';
-import { NavLink, Navigate, Route, Routes } from 'react-router-dom';
+import { lazy, Suspense, useEffect, useRef, useState, type ReactNode } from 'react';
+import { Link, Navigate, Route, Routes } from 'react-router-dom';
 import { useAuth } from './auth-context';
 import { humanise, ToastProvider } from './components/ui';
-import {
-  IconActivity,
-  IconAlertCircle,
-  IconBarChart,
-  IconBookOpen,
-  IconBot,
-  IconChevronDown,
-  IconGrid,
-  IconInbox,
-  IconLightbulb,
-  IconLogOut,
-  IconMegaphone,
-  IconMessageCircle,
-  IconMoon,
-  IconOctagonAlert,
-  IconRadio,
-  IconShieldAlert,
-  IconSliders,
-  IconSettings,
-  IconSparkles,
-  IconSun,
-  IconUserCircle,
-  IconUsers,
-  IconZap,
-} from './components/icons';
-import { AIProvidersPage } from './pages/ai/providers';
-import { AIVoicePage } from './pages/ai/voice';
-import { AutomationProfilesPage } from './pages/automation/profiles';
-import { AutomationRuleEditorPage } from './pages/automation/rule-editor';
-import { AutomationRulesPage } from './pages/automation/rules';
-import { BulkActionsPage } from './pages/automation/bulk';
-import { CandidatesPage } from './pages/automation/candidates';
-import { BroadcastsPage } from './pages/broadcasts';
-import { ConversationsPage } from './pages/conversations';
-import { CopilotPage } from './pages/copilot';
-import { CustomersPage } from './pages/customers';
-import { DashboardPage } from './pages/dashboard';
-import { DecisionsPage } from './pages/decisions';
-import { EmergencyPage } from './pages/emergency';
-import { EscalationConfigPage } from './pages/escalation-config';
-import { EscalationsPage } from './pages/escalations';
-import { GroupsPage } from './pages/groups';
-import { GroupOperationsPage } from './pages/groups/operations';
-import { GroupDetailPage } from './pages/groups/detail';
-import { SupportMembersPage } from './pages/support/members';
-import { SupportMemberDetailPage } from './pages/support/member-detail';
-import { SupportActivityPage } from './pages/support/activity';
-import { OnboardingRulesPage } from './pages/groups/onboarding';
-import { KnowledgeBrowserPage } from './pages/knowledge/browser';
-import { KnowledgeCandidatesPage } from './pages/knowledge/candidates';
-import { KnowledgeEditorPage } from './pages/knowledge/editor';
+import { IconChevronDown, IconLogOut, IconMoon, IconSun } from './components/icons';
+import { WorkspaceFrame } from './components/workspace-shell';
+const AIProvidersPage = lazy(() => import('./pages/ai/providers').then(module => ({ default: module.AIProvidersPage })));
+const AIVoicePage = lazy(() => import('./pages/ai/voice').then(module => ({ default: module.AIVoicePage })));
+const AutomationProfilesPage = lazy(() => import('./pages/automation/profiles').then(module => ({ default: module.AutomationProfilesPage })));
+const AutomationRuleEditorPage = lazy(() => import('./pages/automation/rule-editor').then(module => ({ default: module.AutomationRuleEditorPage })));
+const AutomationRulesPage = lazy(() => import('./pages/automation/rules').then(module => ({ default: module.AutomationRulesPage })));
+const BulkActionsPage = lazy(() => import('./pages/automation/bulk').then(module => ({ default: module.BulkActionsPage })));
+const CandidatesPage = lazy(() => import('./pages/automation/candidates').then(module => ({ default: module.CandidatesPage })));
+const BroadcastsPage = lazy(() => import('./pages/broadcasts').then(module => ({ default: module.BroadcastsPage })));
+const ConversationsPage = lazy(() => import('./pages/conversations').then(module => ({ default: module.ConversationsPage })));
+const CopilotPage = lazy(() => import('./pages/copilot').then(module => ({ default: module.CopilotPage })));
+const CustomersPage = lazy(() => import('./pages/customers').then(module => ({ default: module.CustomersPage })));
+const DashboardPage = lazy(() => import('./pages/dashboard').then(module => ({ default: module.DashboardPage })));
+const DecisionsPage = lazy(() => import('./pages/decisions').then(module => ({ default: module.DecisionsPage })));
+const EmergencyPage = lazy(() => import('./pages/emergency').then(module => ({ default: module.EmergencyPage })));
+const EscalationConfigPage = lazy(() => import('./pages/escalation-config').then(module => ({ default: module.EscalationConfigPage })));
+const EscalationsPage = lazy(() => import('./pages/escalations').then(module => ({ default: module.EscalationsPage })));
+const GroupsPage = lazy(() => import('./pages/groups').then(module => ({ default: module.GroupsPage })));
+const GroupOperationsPage = lazy(() => import('./pages/groups/operations').then(module => ({ default: module.GroupOperationsPage })));
+const GroupDetailPage = lazy(() => import('./pages/groups/detail').then(module => ({ default: module.GroupDetailPage })));
+const SupportMembersPage = lazy(() => import('./pages/support/members').then(module => ({ default: module.SupportMembersPage })));
+const SupportMemberDetailPage = lazy(() => import('./pages/support/member-detail').then(module => ({ default: module.SupportMemberDetailPage })));
+const SupportActivityPage = lazy(() => import('./pages/support/activity').then(module => ({ default: module.SupportActivityPage })));
+const OnboardingRulesPage = lazy(() => import('./pages/groups/onboarding').then(module => ({ default: module.OnboardingRulesPage })));
+const KnowledgeBrowserPage = lazy(() => import('./pages/knowledge/browser').then(module => ({ default: module.KnowledgeBrowserPage })));
+const KnowledgeCandidatesPage = lazy(() => import('./pages/knowledge/candidates').then(module => ({ default: module.KnowledgeCandidatesPage })));
+const KnowledgeEditorPage = lazy(() => import('./pages/knowledge/editor').then(module => ({ default: module.KnowledgeEditorPage })));
 import { LoginPage } from './pages/login';
-import { ReportsPage } from './pages/reports';
-import { SettingsPage } from './pages/settings';
-import { RateLimitsPage } from './pages/settings/rate-limits';
-import { WhatsAppAccountPage } from './pages/whatsapp-account';
-import { WhatsAppAccountsPage } from './pages/whatsapp-accounts';
+const ReportsPage = lazy(() => import('./pages/reports').then(module => ({ default: module.ReportsPage })));
+const SettingsPage = lazy(() => import('./pages/settings').then(module => ({ default: module.SettingsPage })));
+const RateLimitsPage = lazy(() => import('./pages/settings/rate-limits').then(module => ({ default: module.RateLimitsPage })));
+const WhatsAppAccountPage = lazy(() => import('./pages/whatsapp-account').then(module => ({ default: module.WhatsAppAccountPage })));
+const WhatsAppAccountsPage = lazy(() => import('./pages/whatsapp-accounts').then(module => ({ default: module.WhatsAppAccountsPage })));
+import { OverviewPage } from './pages/workspace/overview';
+const BillingPage = lazy(() => import('./pages/workspace/billing').then(module => ({ default: module.BillingPage })));
+const TeamWorkspacePage = lazy(() => import('./pages/workspace/team').then(module => ({ default: module.TeamWorkspacePage })));
+const NotificationsPage = lazy(() => import('./pages/workspace/notifications').then(module => ({ default: module.NotificationsPage })));
+const SavedRepliesPage = lazy(() => import('./pages/workspace/replies').then(module => ({ default: module.SavedRepliesPage })));
+const ReleasesPage = lazy(() => import('./pages/workspace/releases').then(module => ({ default: module.ReleasesPage })));
+const JobsPage = lazy(() => import('./pages/workspace/jobs').then(module => ({ default: module.JobsPage })));
+const SupportQueuePage = lazy(() => import('./pages/workspace/queue').then(module => ({ default: module.SupportQueuePage })));
+const AccessPage = lazy(() => import('./pages/workspace/access').then(module => ({ default: module.AccessPage })));
+const CustomerProfilePage = lazy(() => import('./pages/workspace/customer').then(module => ({ default: module.CustomerProfilePage })));
 
-const CONSOLE_VERSION = 'v0.1.0';
+
 
 /**
  * The operator console.
@@ -74,7 +61,6 @@ const CONSOLE_VERSION = 'v0.1.0';
  */
 export function App() {
   const { user, loading } = useAuth();
-  const [collapsed, setCollapsed] = useState(false);
 
   // Held until the session check finishes, so a signed-in operator refreshing the page is never
   // bounced to the login screen for a frame.
@@ -100,17 +86,24 @@ export function App() {
 
   return (
     <ToastProvider>
-      <div className={collapsed ? 'shell collapsed' : 'shell'}>
-        <Sidebar />
-        <div>
-          <Topbar collapsed={collapsed} onToggle={() => setCollapsed((current) => !current)} />
-          <main className="main">
+      <WorkspaceFrame controls={<><ThemeToggle /><UserMenu /></>}>
+            <Suspense fallback={<div className="progress"><span className="spinner" /><span className="muted">Loading workspace?</span></div>}>
             <Routes>
-              <Route path="/" element={<DashboardPage />} />
+              <Route path="/" element={<OverviewPage />} />
+              <Route path="/analytics" element={<Access permission="reports.view"><DashboardPage /></Access>} />
+              <Route path="/support-queue" element={<Access permission="conversations.read"><SupportQueuePage /></Access>} />
+              <Route path="/billing" element={<Access permission="billing.read"><BillingPage /></Access>} />
+              <Route path="/team" element={<Access permission="team.manage"><TeamWorkspacePage /></Access>} />
+              <Route path="/saved-replies" element={<Access permission="messages.read"><SavedRepliesPage /></Access>} />
+              <Route path="/jobs" element={<Access permission="jobs.read"><JobsPage /></Access>} />
+              <Route path="/notifications" element={<NotificationsPage />} />
+              <Route path="/changelog" element={<ReleasesPage />} />
+              <Route path="/access" element={<Access permission="users.read"><AccessPage /></Access>} />
 
               {/* Conversations and customers */}
               <Route path="/conversations" element={<ConversationsPage />} />
               <Route path="/customers" element={<CustomersPage />} />
+              <Route path="/customers/:id" element={<Access permission="customers.read"><CustomerProfilePage /></Access>} />
 
               {/* Channels and groups */}
               <Route path="/channels/whatsapp" element={<WhatsAppAccountsPage />} />
@@ -158,80 +151,15 @@ export function App() {
               <Route path="/login" element={<Navigate to="/" replace />} />
               <Route path="*" element={<Navigate to="/" replace />} />
             </Routes>
-          </main>
-        </div>
-      </div>
+            </Suspense>
+      </WorkspaceFrame>
     </ToastProvider>
   );
 }
 
-function Sidebar() {
+function Access({ permission, children }: { permission: string; children: ReactNode }) {
   const { can } = useAuth();
-
-  const item = (to: string, label: string, icon: ReactNode, end = false) => (
-    <NavLink to={to} end={end} className={({ isActive }) => (isActive ? 'nav-item active' : 'nav-item')} title={label}>
-      {icon}
-      <span>{label}</span>
-    </NavLink>
-  );
-
-  return (
-    <nav className="sidebar">
-      <div className="brand">
-        <span className="brand-mark">S</span>
-        <span className="brand-word">Support CRM</span>
-      </div>
-
-      <div className="nav-group">Operations</div>
-      {item('/', 'Dashboard', <IconGrid size={17} />, true)}
-      {can('conversations.read') && item('/conversations', 'Conversations', <IconInbox size={17} />)}
-      {can('customers.read') && item('/customers', 'Customers', <IconUserCircle size={17} />)}
-      {can('conversations.read') && item('/decisions', 'Decisions', <IconActivity size={17} />)}
-      {can('conversations.read') && item('/escalations', 'Waiting for a human', <IconAlertCircle size={17} />)}
-      {can('conversations.read') && item('/escalations/config', 'Escalation', <IconShieldAlert size={17} />)}
-      {can('reports.view') && item('/reports', 'Reports', <IconBarChart size={17} />)}
-
-      <div className="nav-group">Channels</div>
-      {can('channels.read') && item('/channels/whatsapp', 'WhatsApp', <IconMessageCircle size={17} />)}
-      {can('groups.read') && item('/groups', 'Groups', <IconRadio size={17} />, true)}
-      {can('groups.read') && item('/groups/onboarding', 'Group onboarding', <IconUsers size={17} />)}
-      {can('team.manage') && item('/support-members', 'Support members', <IconUsers size={17} />, true)}
-      {can('team.manage') && item('/support-activity', 'Support activity', <IconRadio size={17} />)}
-
-      <div className="nav-group">Knowledge &amp; AI</div>
-      {can('knowledge.read') && item('/knowledge', 'Knowledge', <IconBookOpen size={17} />)}
-      {can('automation.read') && item('/automation', 'Automation', <IconZap size={17} />)}
-      {can('automation.read') && item('/automation/candidates', 'Proposed automation', <IconLightbulb size={17} />)}
-      {can('settings.read') && item('/ai/providers', 'AI', <IconSparkles size={17} />)}
-
-      <div className="nav-group">Outbound</div>
-      {can('broadcast.create') && item('/broadcasts', 'Broadcasts', <IconMegaphone size={17} />)}
-      {can('automation.simulate') && item('/copilot', 'Copilot', <IconBot size={17} />)}
-
-      <div className="nav-group">System</div>
-      {can('settings.read') && item('/settings', 'Settings', <IconSettings size={17} />, true)}
-      {can('settings.read') && item('/settings/rate-limits', 'Rate limits', <IconSliders size={17} />)}
-      {can('settings.read') && item('/emergency', 'Emergency', <IconOctagonAlert size={17} />)}
-
-      <div className="sidebar-version">Support CRM {CONSOLE_VERSION}</div>
-    </nav>
-  );
-}
-
-/** Sits above every screen: the sidebar collapse toggle and the account menu. Nothing here is
- * decorative — no search box or notification bell that leads nowhere, because this console does
- * not have a search-everything endpoint or a notifications feed to back one. */
-function Topbar({ collapsed, onToggle }: { collapsed: boolean; onToggle: () => void }) {
-  return (
-    <div className="topbar">
-      <button type="button" className="topbar-toggle" onClick={onToggle} title={collapsed ? 'Expand sidebar' : 'Collapse sidebar'}>
-        <IconMenuLines />
-      </button>
-      <div className="topbar-spacer" />
-      <ThemeToggle />
-      <UserMenu />
-    </div>
-  );
+  return can(permission) ? children : <div className="empty"><h1>Access restricted</h1><p className="muted">Your role does not include access to this module.</p><Link to="/">Back to overview</Link></div>;
 }
 
 type Theme = 'dark' | 'light';
@@ -274,16 +202,6 @@ function ThemeToggle() {
     >
       {showingDark ? <IconSun size={17} /> : <IconMoon size={17} />}
     </button>
-  );
-}
-
-function IconMenuLines() {
-  return (
-    <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={1.8} strokeLinecap="round" aria-hidden="true">
-      <path d="M4 6h16" />
-      <path d="M4 12h16" />
-      <path d="M4 18h16" />
-    </svg>
   );
 }
 

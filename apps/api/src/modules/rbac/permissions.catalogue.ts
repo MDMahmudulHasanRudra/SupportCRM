@@ -19,6 +19,8 @@ export interface PermissionDefinition {
 }
 
 export const PERMISSIONS: readonly PermissionDefinition[] = [
+  { key: 'billing.read', label: 'View invoices, payments and subscriptions', category: 'Billing' },
+  { key: 'billing.manage', label: 'Manage billing and reverse payments', category: 'Billing', isDangerous: true },
   // --- Groups (spec §108) ---------------------------------------------------
   { key: 'groups.read', label: 'View groups', category: 'Groups' },
   { key: 'groups.update', label: 'Update a group', category: 'Groups' },
