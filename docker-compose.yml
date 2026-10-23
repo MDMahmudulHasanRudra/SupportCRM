@@ -2,13 +2,11 @@
 # nginx, no separate reverse-proxy container, nothing else to install.
 #
 # Services: postgres, redis, a one-shot migrate+seed, the API, the worker, web (the console, which
-# also proxies /api and /socket.io to the API — see apps/web/nginx.conf), and openwa (the WhatsApp
+# also proxies /api and /socket.io to the API — see apps/web/nginx.conf), and gowa (the WhatsApp
 # gateway). Only web publishes a host port (12000 by default); everything else, the gateway
 # included, is reachable exclusively on the compose network.
 #
-# The gateway is built from `gateway/` in this repository and started here, so one command produces
-# a deployment an operator can pair a phone with. `gateway/docker-compose.yml` still exists for
-# running it standalone — do not run both against the same volume, or two systems end up driving one
+# Do not start a second independent gateway against a paired volume. When running it standalone — do not run both against the same volume, or two systems end up driving one
 # WhatsApp account (docs/adr/0001 §12).
 #
 # PROJECT_SPEC.md §150–151: persistent volumes, health checks, restart policies, env configuration.
@@ -83,13 +81,15 @@ services:
       # What the gateway is told to POST webhooks to. It must be reachable FROM THE GATEWAY, so
       # inside compose it is the service name — `localhost` there means the gateway itself, and
       # inbound messages would silently never arrive.
+      CRM_PUBLIC_URL: ${CRM_PUBLIC_URL:-http://localhost:12000}
       API_BASE_URL: ${API_BASE_URL:-http://api:4000}
       # Uploaded knowledge documents. Backed by the storage_data volume on api and worker; both
       # must agree, because the API writes the file and the worker parses and indexes it.
       STORAGE_LOCAL_PATH: /app/storage
-      OPENWA_BASE_URL: ${OPENWA_BASE_URL:-http://openwa:2785}
-      OPENWA_API_KEY: ${OPENWA_API_KEY:-}
-      OPENWA_WEBHOOK_SECRET: ${OPENWA_WEBHOOK_SECRET:-}
+      GOWA_LINK_PREVIEW_HOSTS: ${GOWA_LINK_PREVIEW_HOSTS:-}
+      GOWA_BASE_URL: http://gowa:3000
+      GOWA_BASIC_AUTH: ${GOWA_BASIC_AUTH}
+      GOWA_MANAGED_AUTOMATION_DISABLED: "true"
     command: ["sh", "-c", "node dist/database/migrate.js && node dist/seed.js"]
     networks: [support_crm_net]
 
@@ -139,102 +139,36 @@ services:
       start_period: 5s
     networks: [support_crm_net]
 
-  # The WhatsApp gateway (OpenWA), built from `gateway/` in this repository.
-  #
-  # Part of the stack rather than a thing to install separately: `docker compose up` must produce a
-  # deployment an operator can pair a phone with, and requiring them to run a second compose project
-  # first is exactly the manual step this service exists to remove.
-  #
-  # It publishes NO host port. The API reaches it at `http://openwa:2785` on the compose network, and
-  # it reaches the API back at `http://api:4000` for webhooks. Nothing about it is browser-reachable:
-  # the pairing code travels gateway -> API -> browser, never gateway -> browser.
-  #
-  # SQLite on its own volume — the gateway owns its storage, separate from the CRM database, and the
-  # built-in Postgres/Redis/MinIO profiles in `gateway/docker-compose.yml` stay unused.
-  openwa:
-    build:
-      context: ./gateway
-      dockerfile: Dockerfile
+  # Pinned Go WhatsApp runtime. Legacy OpenWA data remains on its old volume for rollback.
+  gowa:
+    image: ghcr.io/aldinokemal/go-whatsapp-web-multidevice@sha256:6a213a3434f1d94f98b4ee90ee2c71fa391f715ff31bf00734a6240859fe10ba
     restart: unless-stopped
+    command: ["rest"]
     environment:
-      PORT: 2785
-      NODE_ENV: production
-      LOG_LEVEL: ${OPENWA_LOG_LEVEL:-info}
-      # The same key the CRM sends as X-API-Key. One value, both sides, never in the browser.
-      API_MASTER_KEY: ${OPENWA_API_KEY}
-      # Resume already-authenticated sessions when the gateway boots.
-      #
-      # This is what makes a VPS reboot survivable: without it the container comes back healthy, the
-      # session stays down, and the console goes on reporting the last state it saw — WhatsApp
-      # silently offline while the dashboard claims otherwise. Verified: with it off, a gateway
-      # restart left the session DISCONNECTED for as long as it was watched.
-      #
-      # Only sessions that already hold WhatsApp auth resume, so an unpaired account never starts a
-      # Chromium. Operators running many accounts on a small VPS can set this false and reconnect
-      # each account deliberately from the WhatsApp screen — see docs/DEPLOYMENT.md (memory).
-      AUTO_START_SESSIONS: ${OPENWA_AUTO_START_SESSIONS:-true}
-      DATABASE_TYPE: sqlite
-      DATABASE_NAME: ./data/openwa.sqlite
-      DATABASE_SYNCHRONIZE: 'true'
-      DATABASE_LOGGING: 'false'
-      ENGINE_TYPE: whatsapp-web.js
-      SESSION_DATA_PATH: ./data/sessions
-      PUPPETEER_HEADLESS: 'true'
-      STORAGE_TYPE: local
-      STORAGE_LOCAL_PATH: ./data/media
-      REDIS_ENABLED: 'false'
-      QUEUE_ENABLED: 'false'
-      CACHE_ENABLED: 'false'
-      # The gateway refuses to deliver webhooks to internal addresses (SSRF guard), and `api` is
-      # exactly such an address. The guard stays ON — only the one host Support CRM actually needs is
-      # allowlisted, so a webhook still cannot be pointed at cloud metadata or an arbitrary internal
-      # service. Without this, pairing succeeds but no inbound message ever reaches the CRM.
-      WEBHOOK_SSRF_PROTECT: 'true'
-      SSRF_ALLOWED_HOSTS: ${OPENWA_SSRF_ALLOWED_HOSTS:-api}
-      # Writable HOME/XDG on tmpfs: the rootfs is read-only and Chromium writes relative to both.
-      HOME: /tmp
-      XDG_CONFIG_HOME: /tmp/.config
-      XDG_CACHE_HOME: /tmp/.cache
+      APP_PORT: 3000
+      APP_BASIC_AUTH: ${GOWA_BASIC_AUTH:?Configure GOWA_BASIC_AUTH in .env}
+      APP_OS: Support CRM
+      APP_UI_ENABLED: "false"
+      APP_UI_AUTO_UPDATE: "false"
+      MCP_ENABLED: "false"
+      DB_URI: file:storages/whatsapp.db?_foreign_keys=on
+      WHATSAPP_AUTO_REPLY: ""
+      WHATSAPP_AUTO_MARK_READ: "false"
+      WHATSAPP_AUTO_DOWNLOAD_MEDIA: "true"
+      WHATSAPP_IGNORE_STATUS_MEDIA: "false"
+      WHATSAPP_PRESENCE_ON_CONNECT: unavailable
+      WHATSAPP_PRESENCE_PULSE_ENABLED: "false"
+      CHATWOOT_ENABLED: "false"
+      TZ: ${TZ:-Asia/Dhaka}
     volumes:
-      # Everything that makes a paired session survive a restart: the WhatsApp auth state, the
-      # gateway's SQLite database, and stored media. Losing this volume means scanning a QR again.
-      - openwa_data:/app/data
-    # Container hardening, matching the gateway's own compose. Chromium runs with --no-sandbox, so
-    # the container is the confinement boundary.
-    security_opt:
-      - 'no-new-privileges:true'
-    cap_drop:
-      - ALL
-    cap_add:
-      - CHOWN
-      - DAC_OVERRIDE
-      - FOWNER
-      - SETGID
-      - SETUID
-    read_only: true
-    tmpfs:
-      - /tmp
-    # Chromium is multi-process; WhatsApp Web is process-heavy. 2048 fits several sessions with
-    # startup headroom. Never -1 — that drops the fork-bomb guard.
-    pids_limit: ${OPENWA_PIDS_LIMIT:-2048}
-    # Raise for more concurrent sessions. Too low and Chromium is OOM-killed mid-pairing (exit 137).
-    mem_limit: ${OPENWA_MEM_LIMIT:-2g}
-    # Chromium's default 64MB /dev/shm is not enough for WhatsApp Web; the engine is launched with
-    # --disable-dev-shm-usage, and this gives it real shared memory rather than relying on that alone.
-    shm_size: ${OPENWA_SHM_SIZE:-512m}
-    # Chromium needs a while to boot before the session API answers.
+      - gowa_data:/app/storages
+      - gowa_media:/app/statics
     healthcheck:
-      test:
-        [
-          'CMD',
-          'node',
-          '-e',
-          "require('http').get('http://localhost:2785/api/health/ready', (r) => process.exit(r.statusCode === 200 ? 0 : 1)).on('error', () => process.exit(1))",
-        ]
-      interval: 15s
-      timeout: 10s
+      test: ["CMD", "wget", "-qO-", "http://127.0.0.1:3000/health"]
+      interval: 10s
+      timeout: 5s
       retries: 5
-      start_period: 60s
+      start_period: 20s
     networks: [support_crm_net]
 
   worker:
@@ -274,6 +208,10 @@ volumes:
   # up after the database: losing it means re-pairing every WhatsApp account by QR.
   openwa_data:
     name: support_crm_openwa_data
+  gowa_data:
+    name: support_crm_gowa_data
+  gowa_media:
+    name: support_crm_gowa_media
   pg_data:
     name: support_crm_pg_data
   redis_data:

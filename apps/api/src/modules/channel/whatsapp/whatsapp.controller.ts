@@ -4,6 +4,7 @@ import {
   ConflictException,
   Controller,
   Get,
+  Header,
   InternalServerErrorException,
   Param,
   ParseUUIDPipe,
@@ -13,7 +14,7 @@ import {
 import { InjectRepository } from '@nestjs/typeorm';
 import { Repository } from 'typeorm';
 import { ApiOperation, ApiTags } from '@nestjs/swagger';
-import { IsBoolean, IsOptional, IsString, Matches, MaxLength, MinLength } from 'class-validator';
+import { IsBoolean, IsObject, IsOptional, IsString, Matches, MaxLength, MinLength } from 'class-validator';
 import type { Request } from 'express';
 import { AppLogger } from '../../../common/logging/app-logger';
 import { AuditService } from '../../audit/audit.service';
@@ -32,6 +33,7 @@ import {
   toPresentationState,
   toUserFacingError,
 } from './whatsapp-presentation';
+import { GoWaClient } from './gowa.client';
 import { WhatsAppAutomationGuard } from './whatsapp-automation.guard';
 import { WhatsAppChannelAdapter } from './whatsapp.adapter';
 
@@ -47,6 +49,10 @@ export class RegisterAccountDto {
 
   @IsOptional() @IsBoolean() isPrimary?: boolean;
 }
+
+export class PhonePairingDto { @Matches(/^[1-9][0-9]{6,14}$/) phone!: string; }
+export class PasskeyAssertionDto { @IsObject() assertion!: Record<string,unknown>; }
+export class RemoveDeviceDto { @Matches(/^REMOVE$/) confirm!: string; }
 
 export class SetOwnershipDto {
   @IsBoolean() enabled!: boolean;
@@ -78,6 +84,7 @@ export class WhatsAppController {
     private readonly automationGuard: WhatsAppAutomationGuard,
     private readonly ingestion: IngestionService,
     private readonly audit: AuditService,
+    private readonly native: GoWaClient,
   ) {}
 
   /**
@@ -315,10 +322,13 @@ export class WhatsAppController {
    * audit entry records that a QR was *viewed*, never its contents.
    */
   @Get('accounts/:id/qr')
+  @Header('Cache-Control','no-store')
   @RequirePermissions('channels.manage')
   @ApiOperation({ summary: 'Fetch the pairing QR code (sensitive — never logged or stored)' })
   async qr(@Param('id') id: string, @CurrentUser() user: AuthenticatedUser, @Req() request: Request) {
     const payload = await this.adapter.getPairingPayload(id);
+    if(payload.state===ChannelConnectionState.CONNECTED){const current=await this.accounts.findOne(id);if(current.status!==ChannelConnectionState.CONNECTED){const live=await this.adapter.getAccountState(id);await this.accounts.recordState(current,live.status,{source:ConnectionEventSource.GATEWAY_POLL,displayIdentity:live.displayIdentity,accountPhone:live.accountPhone??null,capabilities:live.capabilities});}}
+
 
     await this.audit.record(
       { action: 'channels.qr_viewed', resource: 'channel_account', resourceId: id },
@@ -340,39 +350,50 @@ export class WhatsAppController {
 
   @Post('accounts/:id/disconnect')
   @RequirePermissions('channels.manage')
-  @ApiOperation({ summary: 'Stop the session without destroying its device pairing' })
+  @ApiOperation({ summary: 'Pause CRM ownership while retaining device pairing' })
   async disconnect(
     @Param('id') id: string,
     @CurrentUser() user: AuthenticatedUser,
     @Req() request: Request,
   ) {
-    return this.accounts.withSessionLock(id, 'disconnect', async () => {
-      const account = await this.accounts.findOne(id);
+    // The provider cannot suspend a paired socket. This compatibility route now pauses CRM.
+    await this.recovery.setOperatorIntent(id, 'disconnect');
+    return this.setOwnership(id, {enabled:false}, user, request);
+  }
 
-      // Recorded BEFORE the gateway call: the moment the session drops, a webhook lands on the
-      // worker and the recovery sweep could otherwise treat this deliberate shutdown as a fault
-      // and immediately undo it.
-      await this.recovery.setOperatorIntent(id, 'disconnect');
+  private async device(id:string) {
+    const account=await this.accounts.findOne(id);
+    if(account.channelKey!==ChannelKey.WHATSAPP||!account.externalId)throw new ConflictException('Create and connect a WhatsApp account first.');
+    return account.externalId;
+  }
 
-      await this.accounts.recordState(account, ChannelConnectionState.DISCONNECTING, {
-        source: ConnectionEventSource.ADMIN_ACTION,
-        actorId: user.id,
-      });
+  @Post('accounts/:id/pairing-code') @RequirePermissions('channels.manage')
+  async pairingCode(@Param('id',ParseUUIDPipe)id:string,@Body()dto:PhonePairingDto,@CurrentUser()user:AuthenticatedUser,@Req()req:Request){
+    const result=await this.native.pairCode(await this.device(id),dto.phone);
+    await this.audit.record({action:'channels.pairing_code_requested',resource:'channel_account',resourceId:id},this.audit.actorFromRequest(req,user));
+    return {code:result.pair_code};
+  }
 
-      await this.adapter.disconnect(id);
-
-      const updated = await this.accounts.recordState(
-        await this.accounts.findOne(id),
-        ChannelConnectionState.DISCONNECTED,
-        { source: ConnectionEventSource.ADMIN_ACTION, actorId: user.id, capabilities: null },
-      );
-
-      await this.audit.record(
-        { action: 'channels.disconnect', resource: 'channel_account', resourceId: id },
-        this.audit.actorFromRequest(request, user),
-      );
-
-      return serializeAccount(updated);
+  @Post('accounts/:id/passkey/status') @RequirePermissions('channels.manage')
+  async passkeyStatus(@Param('id',ParseUUIDPipe)id:string){return this.native.request('GET','/app/passkey',undefined,await this.device(id));}
+  @Post('accounts/:id/passkey/response') @RequirePermissions('channels.manage')
+  async passkeyResponse(@Param('id',ParseUUIDPipe)id:string,@Body()dto:PasskeyAssertionDto,@CurrentUser()user:AuthenticatedUser,@Req()req:Request){
+    const result=await this.native.request('POST','/app/passkey/response',dto.assertion,await this.device(id));
+    await this.audit.record({action:'channels.passkey_response',resource:'channel_account',resourceId:id},this.audit.actorFromRequest(req,user));return result;
+  }
+  @Post('accounts/:id/passkey/confirm') @RequirePermissions('channels.manage')
+  async passkeyConfirm(@Param('id',ParseUUIDPipe)id:string,@CurrentUser()user:AuthenticatedUser,@Req()req:Request){
+    const result=await this.native.request('POST','/app/passkey/confirm',{},await this.device(id));
+    await this.audit.record({action:'channels.passkey_confirm',resource:'channel_account',resourceId:id},this.audit.actorFromRequest(req,user));return result;
+  }
+  @Post('accounts/:id/remove-device') @RequirePermissions('channels.manage')
+  async removeDevice(@Param('id',ParseUUIDPipe)id:string,@Body()_dto:RemoveDeviceDto,@CurrentUser()user:AuthenticatedUser,@Req()req:Request){
+    return this.accounts.withSessionLock(id,'remove',async()=>{
+      const device=await this.device(id);await this.recovery.setOperatorIntent(id,'disconnect');
+      await this.native.request('DELETE',`/devices/${encodeURIComponent(device)}`);
+      await this.accountRepo.update(id,{externalId:null,webhookExternalId:null,webhookSecretEncrypted:null,accountPhone:null,capabilities:null,status:ChannelConnectionState.DISCONNECTED,ownershipEnabled:false});
+      await this.audit.record({action:'channels.device_removed',resource:'channel_account',resourceId:id},this.audit.actorFromRequest(req,user));
+      return serializeAccount(await this.accounts.findOne(id));
     });
   }
 
@@ -416,7 +437,7 @@ export class WhatsAppController {
   /** Reconnect is stop-then-start, so a wedged session recovers without an operator doing both. */
   @Post('accounts/:id/reconnect')
   @RequirePermissions('channels.manage')
-  @ApiOperation({ summary: 'Stop and restart the session' })
+  @ApiOperation({ summary: 'Reconnect the paired WhatsApp device' })
   async reconnect(
     @Param('id') id: string,
     @CurrentUser() user: AuthenticatedUser,
@@ -426,8 +447,7 @@ export class WhatsAppController {
       await this.recovery.setOperatorIntent(id, 'connect');
 
       // Already stopped is a fine outcome — the goal is "running", not "was stopped by me".
-      await this.adapter.disconnect(id).catch(() => undefined);
-      const state = await this.adapter.connect(id);
+      const state = await this.adapter.reconnect(id);
 
       /*
        * Reconcile the webhook, rather than assume one exists.
@@ -488,6 +508,7 @@ export class WhatsAppController {
 
     let gateway: { reachable: boolean; state: ChannelConnectionState; displayIdentity: string | null };
     try {
+      await this.native.request('GET','/health');
       const state = await this.adapter.getAccountState(id);
       gateway = { reachable: true, state: state.status, displayIdentity: state.displayIdentity };
     } catch {

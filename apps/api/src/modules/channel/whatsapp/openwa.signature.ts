@@ -1,18 +1,8 @@
 import { createHmac, timingSafeEqual } from 'node:crypto';
 
-/**
- * Webhook signature verification (Phase 2 brief §4, §21).
- *
- * The gateway computes `sha256=<hex>` as an HMAC-SHA256 over the **exact serialized body** it sent
- * (`gateway/src/modules/webhook/webhook-delivery.service.ts:784`). Verification therefore has to run
- * against the raw bytes — re-serializing a parsed object produces different bytes for the same
- * logical payload (key order, whitespace, unicode escaping) and would reject every legitimate
- * delivery. That is why the webhook route is registered with a raw body parser.
- *
- * The comparison is constant-time. A fast `===` on an HMAC leaks, through timing, how many leading
- * bytes matched, which is enough to forge a signature byte by byte given enough attempts.
+/** Shared raw-byte HMAC SHA-256 helper. Active transport uses X-Hub-Signature-256.
+ * The filename remains compatible with existing pure normalization/security fixtures.
  */
-
 export enum SignatureFailure {
   MISSING_SECRET = 'MISSING_SECRET',
   MISSING_SIGNATURE = 'MISSING_SIGNATURE',

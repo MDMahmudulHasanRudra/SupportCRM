@@ -219,7 +219,7 @@ export function WhatsAppAccountPage() {
                   <IconRefresh size={15} /> Reconnect
                 </button>
                 <button type="button" disabled={busy || !account.connected} onClick={() => setConfirming('disconnect')}>
-                  Disconnect
+                  Pause CRM
                 </button>
                 <button
                   type="button"
@@ -239,8 +239,8 @@ export function WhatsAppAccountPage() {
             )}
 
             <p className="hint" style={{ marginTop: 0 }}>
-              Reconnect restarts the session without re-pairing — you will not rescan. Disconnect stops the session
-              but keeps the device link, so it can be started again.
+              Reconnect restores the paired connection — you will not rescan. Pause CRM pauses sending and automation
+              but keeps the device link, and can be resumed with Take over.
             </p>
 
             {manage && <div className="row">{!account.isPrimary ? <button disabled={busy} onClick={() => void run('Primary WhatsApp account updated.', () => whatsapp.setPrimary(account.id))}>Set as primary account</button> : <Badge tone="ok">Primary account</Badge>}<button className="danger" disabled={busy || !account.connected} onClick={() => setConfirming('logout')}>Log out device</button></div>}
@@ -300,7 +300,7 @@ export function WhatsAppAccountPage() {
 
       {confirming === 'disconnect' && (
         <ConfirmDialog
-          title="Disconnect WhatsApp?"
+          title="Pause CRM WhatsApp?"
           body={
             <>
               <p>
@@ -308,18 +308,18 @@ export function WhatsAppAccountPage() {
               </p>
               <p className="muted small">
                 Existing conversations and history stay exactly as they are. The device link is kept, so you can start
-                the session again without rescanning.
+                CRM ownership again without rescanning.
               </p>
             </>
           }
-          confirmLabel="Disconnect"
+          confirmLabel="Pause CRM"
           busy={busy}
           onCancel={() => setConfirming(null)}
-          onConfirm={() => void run('Disconnected.', () => whatsapp.disconnect(account.id))}
+          onConfirm={() => void run('CRM paused.', () => whatsapp.disconnect(account.id))}
         />
       )}
 
-      {confirming === 'logout' && <ConfirmDialog title="Log out this WhatsApp device?" body={<><p>This unlinks <strong>{account.phoneNumber ?? account.name}</strong> from Support CRM. Linking it again requires a new QR scan.</p><p className="muted small">Stored conversations and customer history are retained. Use Disconnect when you only want to pause the session.</p></>} confirmWord="LOGOUT" confirmLabel="Log out device" busy={busy} onCancel={() => setConfirming(null)} onConfirm={() => void run('Device logout completed. Scan a new QR to link again.', () => whatsapp.logoutAccount(account.id))} />}
+      {confirming === 'logout' && <ConfirmDialog title="Log out this WhatsApp device?" body={<><p>This unlinks <strong>{account.phoneNumber ?? account.name}</strong> from Support CRM. Linking it again requires a new QR scan.</p><p className="muted small">Stored conversations and customer history are retained. Use Pause CRM when you only want to pause the session.</p></>} confirmWord="LOGOUT" confirmLabel="Log out device" busy={busy} onCancel={() => setConfirming(null)} onConfirm={() => void run('Device logout completed. Scan a new QR to link again.', () => whatsapp.logoutAccount(account.id))} />}
 
       {confirming === 'handback' && (
         <ConfirmDialog

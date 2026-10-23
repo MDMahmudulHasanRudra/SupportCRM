@@ -1,5 +1,5 @@
 import { InjectQueue, Processor, WorkerHost } from '@nestjs/bullmq';
-import { Injectable, OnApplicationBootstrap } from '@nestjs/common';
+import { Injectable, OnApplicationBootstrap,Optional } from '@nestjs/common';
 import { Queue } from 'bullmq';
 import type { Job } from 'bullmq';
 import { AppLogger } from '../../common/logging/app-logger';
@@ -8,6 +8,7 @@ import { BroadcastService } from '../broadcast/broadcast.service';
 import { IngestionService } from '../ingestion/ingestion.service';
 import { QUEUES } from '../jobs/queues';
 import { DeliveryService } from '../messaging/delivery.service';
+import { GoWaToolsService } from './whatsapp/gowa-tools.service';
 import { ChannelAccountService } from './channel-account.service';
 import { ChannelConnectionState, ConnectionEventSource } from './channel-connection';
 import { ChannelRecoveryService } from './channel-recovery.service';
@@ -46,6 +47,7 @@ export class ChannelMaintenanceProcessor extends WorkerHost implements OnApplica
     private readonly ingestion: IngestionService,
     private readonly metrics: MetricsService,
     private readonly broadcasts: BroadcastService,
+    @Optional()private readonly whatsappTools?:GoWaToolsService,
   ) {
     super();
   }
@@ -68,6 +70,7 @@ export class ChannelMaintenanceProcessor extends WorkerHost implements OnApplica
 
   async process(_job: Job): Promise<void> {
     await this.metrics.time('maintenance.sweep_ms', async () => {
+      await this.whatsappTools?.sweep().catch(error=>this.logger.warn('WhatsApp schedules sweep failed',{error:(error as Error).message}));
       // Scheduled broadcasts (§97). Folded into the existing sweep rather than given a scheduler of
       // its own: this one already runs exactly once across every replica, and a second repeatable
       // job would be a second thing to reason about when a campaign goes out late.

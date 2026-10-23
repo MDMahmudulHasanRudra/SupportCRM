@@ -22,6 +22,8 @@ import { JobItem } from './job-item.entity';
  * flushed and the job history survives (`PROJECT_SPEC.md` §184).
  */
 export enum JobType {
+  WHATSAPP_ACTION = 'WHATSAPP_ACTION',
+  WHATSAPP_INTEGRATION_SYNC='WHATSAPP_INTEGRATION_SYNC',
   /** Real, exercised in Phase 1 — proves the whole pipeline without waiting for a domain feature. */
   SYSTEM_ECHO = 'SYSTEM_ECHO',
   /** One item per group: fetch its detail from the channel and reconcile participants. */

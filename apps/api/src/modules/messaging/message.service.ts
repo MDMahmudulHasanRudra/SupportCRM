@@ -18,6 +18,10 @@ import { DeliveryStatus, MessageContentType } from './message-types';
 const MAX_OUTBOUND_BODY = 16_000;
 
 export interface SendMessageInput {
+  channelCommand?:import('../channel/channel-adapter.interface').ChannelCommand;
+  contentType?:MessageContentType;
+  scheduledFor?:Date;
+  managedScheduleId?:string;
   channelAccountId: string;
   externalConversationId: string;
   body: string;
@@ -69,7 +73,7 @@ export class MessageService {
 
   async send(input: SendMessageInput): Promise<OutboundMessage> {
     const body = (input.body ?? '').trim();
-    if (!body && !input.attachments?.length) {
+    if (!body && !input.attachments?.length&&!input.channelCommand) {
       throw new BadRequestException('A message must have a body or at least one attachment');
     }
     if (body.length > MAX_OUTBOUND_BODY) {
@@ -82,6 +86,7 @@ export class MessageService {
       const existing = await this.outbound.findOne({ where: { idempotencyKey: input.idempotencyKey } });
       if (existing) {
         this.metrics.increment('outbound.idempotent_hit');
+        if(existing.status===DeliveryStatus.QUEUED)await this.enqueue(existing);
         return existing;
       }
     }
@@ -138,7 +143,10 @@ export class MessageService {
           channelKey: account.channelKey as ChannelKey,
           channelAccountId: account.id,
           externalConversationId: input.externalConversationId,
-          contentType: input.attachments?.length ? MessageContentType.DOCUMENT : MessageContentType.TEXT,
+          contentType: input.contentType??(input.attachments?.length ? MessageContentType.DOCUMENT : MessageContentType.TEXT),
+          channelCommand:input.channelCommand??null,
+          scheduledFor:input.scheduledFor??null,
+          managedScheduleId:input.managedScheduleId??null,
           body: body || null,
           quotedExternalId: input.quotedExternalId ?? null,
           attachments: input.attachments?.length
@@ -157,23 +165,12 @@ export class MessageService {
       // winner rather than surfacing a constraint error to the caller.
       if ((error as { code?: string }).code === '23505' && input.idempotencyKey) {
         const winner = await this.outbound.findOne({ where: { idempotencyKey: input.idempotencyKey } });
-        if (winner) return winner;
+        if (winner) {if(winner.status===DeliveryStatus.QUEUED)await this.enqueue(winner);return winner;}
       }
       throw error;
     }
 
-    await this.queue.add(
-      'send',
-      { outboundMessageId: row.id },
-      {
-        // Hyphen, not colon — see the note in ingestion.service.ts on BullMQ's job-id rule.
-        jobId: `om-${row.id}`,
-        attempts: 5,
-        backoff: { type: 'exponential', delay: 5_000 },
-        removeOnComplete: { age: 3600, count: 2000 },
-        removeOnFail: { age: 24 * 3600 },
-      },
-    );
+    await this.enqueue(row);
 
     this.metrics.increment('outbound.queued', { source: row.source });
     this.logger.log('Outbound message queued', {
@@ -184,6 +181,23 @@ export class MessageService {
     return row;
   }
 
+  private async enqueue(row:OutboundMessage){
+    await this.queue.add(
+      'send',
+      { outboundMessageId: row.id },
+      {
+        // Hyphen, not colon — see the note in ingestion.service.ts on BullMQ's job-id rule.
+        jobId: `om-${row.id}`,
+        delay:Math.max(0,(row.scheduledFor?.getTime()??0)-Date.now()),
+        attempts: 5,
+        backoff: { type: 'exponential', delay: 5_000 },
+        removeOnComplete: { age: 3600, count: 2000 },
+        removeOnFail: { age: 24 * 3600 },
+      },
+    );
+
+  }
+
   /** Cancels a message that has not been handed to the gateway yet. */
   async cancel(id: string): Promise<OutboundMessage> {
     const row = await this.findOne(id);
@@ -192,10 +206,8 @@ export class MessageService {
       // guarantee would be worse than refusing (`PROJECT_SPEC.md` §209).
       throw new ConflictException(`Cannot cancel a message that is already ${row.status}`);
     }
-    await this.outbound.update(id, {
-      status: DeliveryStatus.CANCELLED,
-      failureReason: 'Cancelled before dispatch',
-    });
+    const cancelled=await this.outbound.update({id,status:DeliveryStatus.QUEUED}, {status:DeliveryStatus.CANCELLED,failureReason:'Cancelled before dispatch'});
+    if(!cancelled.affected)throw new ConflictException('The message has already been claimed for sending.');
     await this.queue.remove(`om-${id}`).catch(() => undefined);
     return this.findOne(id);
   }

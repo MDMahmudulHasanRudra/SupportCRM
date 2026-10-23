@@ -25,6 +25,11 @@ export interface CreateCustomerInput {
   company?: string | null;
   source?: CustomerSource;
   createdById?: string | null;
+  code?: string | null;
+  country?: string | null;
+  serviceName?: string | null;
+  accountOwnerId?: string | null;
+  status?: CustomerStatus;
 }
 
 /**
@@ -63,40 +68,61 @@ export class CustomerService {
   // === customers =================================================================================
 
   async create(input: CreateCustomerInput): Promise<Customer> {
+    return this.dataSource.transaction(async tx => {
+    await tx.query("SELECT pg_advisory_xact_lock(hashtext('customer-import-directory'))");
+    if (!input.displayName.trim()) throw new BadRequestException('Customer name is required.');
+    if (input.code && /^CL-\d+$/.test(input.code)) throw new BadRequestException('CL-number codes are reserved for automatic client codes. Leave code empty or use your own prefix.');
+    await this.validateOwner(input.accountOwnerId, tx);
     const phone = CustomerService.normalizePhone(input.primaryPhone);
     if (input.primaryPhone && !phone) {
       throw new BadRequestException(`"${input.primaryPhone}" is not a usable phone number`);
     }
 
-    const customer = await this.customers.save(
+    let customer: Customer;
+    try { customer = await tx.getRepository(Customer).save(
       this.customers.create({
         displayName: input.displayName.trim(),
         primaryPhone: phone,
         email: input.email?.trim() || null,
         company: input.company?.trim() || null,
-        status: CustomerStatus.ACTIVE,
+        code: input.code || undefined,
+        country: input.country || null,
+        serviceName: input.serviceName?.trim() || null,
+        accountOwnerId: input.accountOwnerId || null,
+        status: input.status ?? CustomerStatus.ACTIVE,
         source: input.source ?? CustomerSource.MANUAL,
         createdById: input.createdById ?? null,
       }),
-    );
+    ); } catch (error) {
+      if ((error as { code?: string }).code === '23505') throw new ConflictException('This client code is already in use.');
+      throw error;
+    }
 
     this.metrics.increment('crm.customer_created', { source: customer.source });
     // The phone number is PII and is deliberately absent from the log line (PROJECT_SPEC.md §110).
     this.logger.log('Customer created', { customerId: customer.id, source: customer.source });
     return customer;
+    });
   }
 
   async findOne(id: string): Promise<Customer> {
-    const customer = await this.customers.findOne({ where: { id }, relations: ['identities'] });
+    const customer = await this.directoryQuery({}).leftJoinAndSelect('c.identities', 'identity').where('c.id = :id', { id }).getOne();
     if (!customer) throw new NotFoundException(`Customer ${id} not found`);
     return customer;
   }
 
   async update(
     id: string,
-    changes: Partial<Pick<Customer, 'displayName' | 'email' | 'company' | 'status'>> & { primaryPhone?: string | null },
+    changes: Partial<Pick<Customer, 'displayName' | 'email' | 'company' | 'status' | 'country' | 'serviceName' | 'accountOwnerId'>> & { primaryPhone?: string | null },
   ): Promise<{ before: Partial<Customer>; after: Customer }> {
-    const before = await this.findOne(id);
+    return this.dataSource.transaction(async tx => {
+    await tx.query("SELECT pg_advisory_xact_lock(hashtext('customer-import-directory'))");
+    const repo = tx.getRepository(Customer);
+    const load = () => this.directoryQuery({}, repo).leftJoinAndSelect('c.identities', 'identity').where('c.id = :id', { id }).getOne();
+    const before = await load();
+    if (!before) throw new NotFoundException('Customer not found.');
+    if (changes.accountOwnerId !== before.accountOwnerId) await this.validateOwner(changes.accountOwnerId, tx);
+    if (changes.displayName !== undefined && !changes.displayName.trim()) throw new BadRequestException('Customer name is required.');
     const snapshot = {
       displayName: before.displayName,
       primaryPhone: before.primaryPhone,
@@ -113,15 +139,19 @@ export class CustomerService {
       throw new BadRequestException(`"${changes.primaryPhone}" is not a usable phone number`);
     }
 
-    await this.customers.update(id, {
+    await repo.update(id, {
       ...(changes.displayName !== undefined ? { displayName: changes.displayName.trim() } : {}),
       ...(phone !== undefined ? { primaryPhone: phone } : {}),
       ...(changes.email !== undefined ? { email: changes.email?.trim() || null } : {}),
       ...(changes.company !== undefined ? { company: changes.company?.trim() || null } : {}),
       ...(changes.status !== undefined ? { status: changes.status } : {}),
+      ...(changes.country !== undefined ? { country: changes.country } : {}),
+      ...(changes.serviceName !== undefined ? { serviceName: changes.serviceName?.trim() || null } : {}),
+      ...(changes.accountOwnerId !== undefined ? { accountOwnerId: changes.accountOwnerId } : {}),
     });
 
-    return { before: snapshot, after: await this.findOne(id) };
+    return { before: snapshot, after: (await load())! };
+    });
   }
 
   /**
@@ -130,17 +160,20 @@ export class CustomerService {
    * Search spans name, phone, email and company. Every term is parameterised — a customer name is
    * untrusted input and must never be concatenated into SQL.
    */
-  async list(options: {
+  directoryQuery(options: {
     search?: string;
     status?: CustomerStatus;
     tagKeys?: string[];
     limit?: number;
     offset?: number;
-  }) {
-    const limit = Math.min(options.limit ?? 25, 100);
-    const offset = Math.max(options.offset ?? 0, 0);
-
-    const qb = this.customers.createQueryBuilder('c').orderBy('c.updatedAt', 'DESC');
+    country?: string;
+    accountOwnerId?: string;
+    unassigned?: string;
+  }, repo = this.customers) {
+    const qb = repo.createQueryBuilder('c').leftJoin('c.accountOwner', 'owner').addSelect(['owner.id', 'owner.name', 'owner.username', 'owner.isActive']);
+    if (options.country) qb.andWhere('c.country = :country', { country: options.country });
+    if (options.accountOwnerId) qb.andWhere('c.accountOwnerId = :ownerId', { ownerId: options.accountOwnerId });
+    if (options.unassigned) qb.andWhere('c.accountOwnerId IS NULL');
 
     if (options.status) qb.andWhere('c.status = :status', { status: options.status });
 
@@ -152,6 +185,7 @@ export class CustomerService {
           w.where('c.displayName ILIKE :term', { term })
             .orWhere('c.email ILIKE :term', { term })
             .orWhere('c.company ILIKE :term', { term });
+          w.orWhere('c.code ILIKE :term', { term }).orWhere('c.serviceName ILIKE :term', { term });
           if (digits.length >= 4) w.orWhere('c.primaryPhone LIKE :digits', { digits: `%${digits}%` });
         }),
       );
@@ -168,8 +202,43 @@ export class CustomerService {
       );
     }
 
-    const [items, total] = await qb.skip(offset).take(limit).getManyAndCount();
+    return qb;
+  }
+
+  async list(options: Parameters<CustomerService['directoryQuery']>[0]) {
+    const limit = Math.min(options.limit ?? 25, 100);
+    const offset = Math.max(options.offset ?? 0, 0);
+    const [items, total] = await this.directoryQuery(options).orderBy('c.updatedAt', 'DESC').addOrderBy('c.id', 'DESC').skip(offset).take(limit).getManyAndCount();
     return { items, total, limit, offset };
+  }
+
+  async owners() {
+    return { items: await this.dataSource.query('SELECT id,name,username FROM users WHERE "isActive"=true ORDER BY name,id LIMIT 1000') };
+  }
+
+  private async validateOwner(id?: string | null, manager = this.dataSource.manager) {
+    if (!id) return;
+    const rows = await manager.query<Array<{ id: string }>>('SELECT id FROM users WHERE id=$1 AND "isActive"=true', [id]);
+    if (!rows.length) throw new BadRequestException('Choose an active account owner.');
+  }
+
+  async exportRows(options: Parameters<CustomerService['directoryQuery']>[0], write: (rows: Customer[]) => Promise<void>) {
+    const q = this.dataSource.createQueryRunner();
+    let cursor: string | undefined; let count = 0;
+    try {
+      await q.connect();
+      await q.startTransaction('REPEATABLE READ');
+      while (true) {
+        const qb = this.directoryQuery(options, q.manager.getRepository(Customer)).orderBy('c.id', 'ASC').take(500);
+        if (cursor) qb.andWhere('c.id > :cursor', { cursor });
+        const rows = await qb.getMany();
+        if (!rows.length) break;
+        await write(rows); count += rows.length; cursor = rows[rows.length-1].id;
+      }
+      await q.commitTransaction();
+      return count;
+    } catch (error) { if(q.isTransactionActive) await q.rollbackTransaction(); throw error; }
+    finally { await q.release(); }
   }
 
   // === identities ================================================================================

@@ -21,6 +21,7 @@ export type WhatsAppEventName =
   | 'whatsapp.account.status_changed'
   | 'whatsapp.account.connected'
   | 'whatsapp.account.qr_expired'
+  | 'whatsapp.chat.presence'
   | 'whatsapp.message.received'
   | 'whatsapp.message.sent'
   | 'whatsapp.message.delivery_updated'

@@ -49,3 +49,11 @@ The diagram describes the existing modular monolith. It does not claim additiona
 ## Isolation and future change
 
 API and worker share entities/migrations but run separately. Multiple WhatsApp accounts are isolated by account IDs and adapter ownership; existing business tables remain workspace-global. Multi-project support needs a separate coordinated schema, permission, query and queue namespace migration. Do not simulate it with a dropdown.
+
+## Go WhatsApp boundary and controlled tools
+
+The same modular monolith now uses the pinned Go WhatsApp HTTP service. Browser -> CRM session/permissions -> catalogue validation -> read request or encrypted operation -> Job Center/outbound queue -> live ownership/capability/rate/emergency checks -> GoWaClient. Every device-scoped request includes X-Device-Id. Signed native webhooks become channel-neutral messages, receipts, mutations and presence events before domain processing. Old serialized message identifiers are recognized as aliases; existing history is preserved.
+
+Recurring schedules persist encrypted commands in CRM, not the gateway scheduler. Maintenance claims due schedules with row locks and stable occurrence keys; the outbound worker rechecks schedule pause/cancel and creator permissions. Missed repeating slots coalesce instead of creating a flood. Group discovery is explicitly a limited snapshot and does not deactivate missing stored groups.
+
+Chatwoot configuration and callback secrets are encrypted. Background integration delivery runs in the Job Center so remote calls do not block channel-health maintenance. Verified Chatwoot replies enter the same outbound queue. Echo source IDs, verified chat bindings and delivery claims prevent independent sending/loops. Ambiguous writes remain UNKNOWN and are not blindly retried. External HTTPS connections resolve and connect to a checked public address without redirects. MCP uses the authenticated CRM catalogue and queues; the upstream public MCP listener remains disabled.

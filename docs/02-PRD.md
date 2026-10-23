@@ -24,9 +24,46 @@ Status: active contract for the design and web account-management phase. Read al
 
 ## Page behavior
 
+## Customer directory expansion
+
+| ID | Requirement | Acceptance |
+|---|---|---|
+| CRM-01 | Stable client codes and business context | Unique immutable auto/manual client code; optional ISO country, service name and active account owner; editable profile values can be cleared; existing customer/identity history is preserved |
+| CRM-02 | Review CSV imports before writing | UTF-8 CSV template and strict parsing; at most 250 rows/512 KiB; row validation, code conflicts and shared phone/email warnings; no automatic identity linking or updates to existing customers |
+| CRM-03 | Confirm and retry imports safely | Actor-bound, expiring signed preview; changed file/validation requires preview again; shared-contact warnings require acknowledgment; commit is atomic and idempotent, audited without raw CSV/contact payloads |
+| CRM-04 | Export the complete selected directory | Permission-controlled streamed CSV of all matching records, consistent transaction snapshot, spreadsheet formula protection and audit; no latest-page cap |
+| CRM-05 | Navigate large directories | Search code/name/contact/company/service; country/status/owner filters and real pagination; stale responses cannot replace the current selection |
+
 Global controls: navigation, page finder, theme toggle, notifications and authenticated account menu. Page finder searches available destinations, not customer content. Current page and section are visible in the topbar. Mobile navigation uses a dismissible drawer.
 
 The overview prioritizes active work over configuration. WhatsApp accounts uses an account list plus a dedicated pairing panel, an obvious add-account action and connection summary. Tables retain complete business values, status text and action labels; unavailable features are not represented as active actions.
+
+## Inbox reading and organization
+
+| ID | Requirement | Acceptance |
+|---|---|---|
+| INBOX-01 | Private in-app read state | Exact inbound message IDs seen in the visible thread are marked read per user; late arrivals and equal timestamps remain unread; no native-channel read receipt is sent |
+| INBOX-02 | Read/unread navigation | Inbound unread counts, first-unread divider and manual unread flag; manual unread remains distinct from an actual unread message count |
+| INBOX-03 | Archive independently of support lifecycle | Archive/unarchive affects only the current user's inbox view, retains all content and does not resolve/close conversations or change automation |
+| INBOX-04 | Bounded bulk organization | Select at most 50 existing conversations; own archive/unarchive with read permission, shared pin/unpin with management permission; validate all targets before atomic writes |
+
+## Go WhatsApp replacement requirements
+
+| ID | Requirement | Acceptance |
+|---|---|---|
+| GOWA-01 | Replace runtime with pinned upstream release | Internal authenticated Go WhatsApp service; account IDs/history retained; legacy pairing is explicitly re-linked |
+| GOWA-02 | Native account journey | Real QR/image and phone-code pairing, device status/reconnect/logout, accurate disconnect and group-discovery limits |
+| GOWA-03 | Signed inbound and delivery | Per-device HMAC, session binding, signed-body deduplication, group sender attribution, text/media/poll/reply mapping and complete ACK batches |
+| GOWA-04 | Feature coverage from actual contract | Source-derived release catalogue and real account-scoped controls for exposed send/message/chat/group/contact/newsletter functions; no arbitrary gateway proxy |
+| GOWA-05 | Preserve human and server controls | Permission/ownership/capability checks, queues, policy/rate/emergency checks, audit, idempotent submission, explicit uncertain outcomes |
+| GOWA-06 | Verify and document migration | Isolated integration tests, browser interactions, real unpaired gateway QR, backups, migration rollback evidence and explicit live-phone limitations |
+
+| GOWA-07 | Single WhatsApp workspace | One shell navigation item; familiar responsive chat list, thread, composer, status, channels, groups, linked devices and advanced tools; old bookmarks redirect |
+| GOWA-08 | CRM recurring delivery | One-off/daily/weekly/monthly schedules, timezone, weekdays/month day, end/occurrence limits, private list/search and pause/resume/cancel; live actor and server controls at dispatch |
+| GOWA-09 | Rich message operations | Protected media, voice recording, emoji, reply/reaction/edit/forward/star/delete, contact/location/poll cards, observed poll votes, typing events and explicit native read/played controls |
+| GOWA-10 | Managed integration access | Per-account encrypted Chatwoot setup/history bridge with queued replies and echo suppression; authenticated stateless MCP and stdio bridge; no independent provider sender |
+
+The owner deferred GOWA-06 integration/browser/device gates for this coding phase. Compile checks and documentation generation may run without starting the runtime. No provider success is inferred from them.
 
 ## Completion policy
 

@@ -21,7 +21,7 @@ def api_inventory():
         routes = list(re.finditer(r"@(Get|Post|Put|Patch|Delete)\((?:['\"]([^'\"]*)['\"])?\)", source))
         for i, route in enumerate(routes):
             block = source[route.end():routes[i + 1].start() if i + 1 < len(routes) else len(source)]
-            method = re.search(r'^  (?:async\s+)?(\w+)\s*\(', block, re.M)
+            method = re.search(r'^\s*(?:async\s+)?(\w+)\s*\(', block, re.M)
             if not method:
                 raise ValueError(f'Cannot resolve route handler: {path}:{route.group(0)}')
             decorators = block[:method.start()]
@@ -45,13 +45,13 @@ def schema_inventory():
             fields = re.findall(r'^  (\w+)!:\s*([^;]+);', block, re.M)
             summary = ', '.join('`' + name + ': ' + kind.replace('|', '\\|') + '`' for name, kind in fields)
             blocks.append(f"| `{entity[1]}` | {summary} | {link(path)} |")
-    migrations = [ROOT / 'apps/api/src/database/migrations' / name for name in ['1788400000000-WorkspaceOperations.ts', '1788400001000-ShiftLifecycle.ts']]
+    migrations = [ROOT / 'apps/api/src/database/migrations' / name for name in ['1788400000000-WorkspaceOperations.ts', '1788400001000-ShiftLifecycle.ts', '1788400002000-CustomerDirectory.ts', '1788400003000-InboxReading.ts', '1788400004000-GoWhatsApp.ts', '1788400005000-WhatsAppTools.ts', '1788400006000-WhatsAppSchedules.ts', '1788400007000-WhatsAppIntegrations.ts','1788400008000-ChannelLabels.ts']]
     extra = '\n\n### Workspace SQL tables\n\nThese are migration-defined and queried transactionally through the existing DataSource; relation/index/check details are in the migration.\n\n| Table | DDL fields | Source |\n|---|---|---|\n'
     for migration in migrations:
         ddl = migration.read_text(encoding='utf-8')
-        tables = re.findall(r'CREATE TABLE (\w+)\s*\(([\s\S]*?)\n      \);', ddl)
+        tables = re.findall(r'CREATE TABLE\s+(\w+)\s*\(([\s\S]*?)\);', ddl)
         for name, body in tables:
-            fields = re.findall(r'(?:^|,)\s*(?:"(\w+)"|(\w+))\s+(uuid|varchar\(\d+\)|bigint|boolean|date|timestamptz|jsonb|text)', body)
+            fields = re.findall(r'(?:^|,)\s*(?:"(\w+)"|(\w+))\s+(uuid|varchar\(\d+\)|bigint|integer|smallint|int|boolean|date|timestamptz|jsonb|text)', body)
             extra += f"| `{name}` | " + ', '.join(f'`{a or b}: {kind}`' for a, b, kind in fields) + f' | {link(migration)} |\n'
     return f"\n### TypeORM entities\n\nSource-derived inventory: **{len(blocks)} entity tables**. Relation properties are included; inspect decorators/migrations for nullability, defaults, foreign keys and indexes.\n\n| Table | Declared properties | Source |\n|---|---|---|\n" + '\n'.join(blocks) + extra
 

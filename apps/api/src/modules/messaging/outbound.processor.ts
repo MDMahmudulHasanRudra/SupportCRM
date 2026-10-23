@@ -2,7 +2,7 @@ import { Processor, WorkerHost } from '@nestjs/bullmq';
 import { Injectable } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
 import type { Job } from 'bullmq';
-import { Repository } from 'typeorm';
+import { In,Repository } from 'typeorm';
 import { AppLogger } from '../../common/logging/app-logger';
 import { MetricsService } from '../../common/metrics/metrics.service';
 import { RateLimitService } from '../../common/redis/rate-limit.service';
@@ -18,6 +18,7 @@ import type { ChannelKey } from '../channel/entities/channel.entity';
 import { QUEUES } from '../jobs/queues';
 import { RealtimeGateway } from '../realtime/realtime.gateway';
 import { EMERGENCY_STOPS, SettingsService } from '../settings/settings.service';
+import { User } from '../auth/entities/user.entity';
 import { OutboundMessage } from './entities/outbound-message.entity';
 import { Message } from './entities/message.entity';
 import { DeliveryStatus, MessageDirection, MessageProcessingStatus } from './message-types';
@@ -92,12 +93,13 @@ export class OutboundProcessor extends WorkerHost {
     const blocked = await this.preSendChecks(row, account);
     if (blocked) return;
 
-    await this.outbound.update(row.id, {
+    const claim=await this.outbound.update({id:row.id,status:DeliveryStatus.QUEUED}, {
       status: DeliveryStatus.SENDING,
       attempts: row.attempts + 1,
       lastAttemptAt: new Date(),
     });
 
+    if(!claim.affected)return;
     const adapter = this.registry.get(account.channelKey as ChannelKey);
 
     let result;
@@ -110,13 +112,15 @@ export class OutboundProcessor extends WorkerHost {
           quotedExternalId: row.quotedExternalId,
           attachments: (row.attachments ?? []) as never,
           idempotencyKey: row.idempotencyKey ?? row.id,
+          channelCommand:row.channelCommand,
         }),
       );
     } catch (error) {
       const message = error instanceof Error ? error.message : String(error);
       // Back to QUEUED so BullMQ's backoff can retry — and so the "only QUEUED may send" guard
       // above still holds on the retry.
-      await this.outbound.update(row.id, { status: DeliveryStatus.QUEUED, failureReason: message.slice(0, 2000) });
+      // Provider writes have no idempotency key. An exception after dispatch cannot be retried safely.
+      await this.outbound.update(row.id, { status: DeliveryStatus.FAILED, failureReason: `Outcome uncertain; inspect history before retrying. ${message}`.slice(0, 2000) });
       this.metrics.increment('outbound.send_error');
       throw error;
     }
@@ -136,6 +140,11 @@ export class OutboundProcessor extends WorkerHost {
    * most-absolute first: an emergency stop should not wait on a rate-limit round trip.
    */
   private async preSendChecks(row: OutboundMessage, account: ChannelAccount): Promise<boolean> {
+    if(row.channelCommand&&row.createdById){const actor=await this.outbound.manager.getRepository(User).findOne({where:{id:row.createdById},relations:{roles:{permissions:true}}});if(!actor?.isActive||!actor.roles.some(r=>r.isSuperAdmin||r.permissions.some(p=>p.key==='messages.send'))){await this.cancel(row,'The creator no longer has permission to send messages');return true;}}
+    if(row.managedScheduleId){const [schedule]=await this.outbound.manager.query<Array<{status:string}>>('SELECT status FROM whatsapp_schedules WHERE id=$1',[row.managedScheduleId]);if(!schedule||['cancelled','failed'].includes(schedule.status)){await this.cancel(row,'The schedule was cancelled or stopped');return true;}if(schedule.status==='paused'){await this.defer(row,'The schedule is paused',60000);return true;}}
+    if(row.scheduledFor&&row.scheduledFor.getTime()>Date.now()){
+      await this.defer(row,'Waiting for the requested send time',row.scheduledFor.getTime()-Date.now());return true;
+    }
     if (await this.settings.isStopped(EMERGENCY_STOPS.OUTGOING_MESSAGES_STOPPED)) {
       // CANCELLED, not FAILED: an emergency stop is a deliberate operator decision, and retrying it
       // later would defeat the control.
@@ -307,6 +316,7 @@ export class OutboundProcessor extends WorkerHost {
             senderExternalId: account.accountPhone ?? account.externalName,
             senderPhone: null,
             senderDisplayName: account.displayIdentity,
+            presentation:row.channelCommand?{kind:row.channelCommand.name,details:row.channelCommand.args.body}: {},
             contentType: row.contentType,
             body: row.body,
             quotedExternalId: row.quotedExternalId,
@@ -318,6 +328,7 @@ export class OutboundProcessor extends WorkerHost {
             outboundMessageId: row.id,
         });
         const message = await this.messages.save(entity);
+        if(row.channelCommand?.files)for(const file of Object.values(row.channelCommand.files))await this.messages.manager.query('INSERT INTO message_attachments(id,"messageId","mimeType",filename,"omittedByProvider","storageRef") VALUES(gen_random_uuid(),$1,$2,$3,false,$4)',[message.id,file.mime,file.name,file.ref]);
         await this.outbound.update(row.id, { messageId: message.id });
       } catch (error) {
         if ((error as { code?: string }).code !== '23505') throw error;
@@ -363,7 +374,7 @@ export class OutboundProcessor extends WorkerHost {
   }
 
   private async fail(row: OutboundMessage, reason: string, options: { retryable: boolean }): Promise<void> {
-    await this.outbound.update(row.id, {
+    await this.outbound.update({id:row.id,status:In([DeliveryStatus.QUEUED,DeliveryStatus.SENDING])}, {
       status: options.retryable ? DeliveryStatus.QUEUED : DeliveryStatus.FAILED,
       failureReason: reason.slice(0, 2000),
     });
@@ -377,7 +388,7 @@ export class OutboundProcessor extends WorkerHost {
   }
 
   private async cancel(row: OutboundMessage, reason: string): Promise<void> {
-    await this.outbound.update(row.id, {
+    await this.outbound.update({id:row.id,status:DeliveryStatus.QUEUED}, {
       status: DeliveryStatus.CANCELLED,
       failureReason: reason.slice(0, 2000),
     });
@@ -388,11 +399,12 @@ export class OutboundProcessor extends WorkerHost {
   /** Leaves the row QUEUED and pushes `scheduledAt` out, so the retry has a defined moment. */
   private async defer(row: OutboundMessage, reason: string, delayMs: number): Promise<void> {
     const delay = Math.min(Math.max(delayMs, 1_000), 15 * 60_000);
-    await this.outbound.update(row.id, {
+    const deferred=await this.outbound.update({id:row.id,status:DeliveryStatus.QUEUED}, {
       status: DeliveryStatus.QUEUED,
       scheduledAt: new Date(Date.now() + delay),
       failureReason: reason.slice(0, 2000),
     });
+    if(!deferred.affected)return;
     this.metrics.increment('outbound.deferred');
     this.logger.debug('Outbound message deferred', { outboundMessageId: row.id, reason, delayMs: delay });
     // Throwing hands the retry to BullMQ's backoff. Returning normally would mark the job complete

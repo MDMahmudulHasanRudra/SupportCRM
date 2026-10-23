@@ -1924,6 +1924,10 @@ export interface Conversation {
   /** Present on the inbox list only — the newest message, truncated server-side. */
   lastMessagePreview?: string | null;
   lastMessageDirection?: MessageDirectionValue | null;
+  unreadCount?: number;
+  firstUnreadMessageId?: string | null;
+  markedUnread?: boolean;
+  isArchived?: boolean;
 }
 
 export interface ConversationWithTags extends Conversation {
@@ -1933,9 +1937,11 @@ export interface ConversationWithTags extends Conversation {
 export type MessageDirectionValue = 'INBOUND' | 'OUTBOUND';
 
 export interface ConversationMessage {
+  presentation?:{[key:string]:unknown;kind?:string;details?:Record<string,unknown>;editedBody?:string;editedAt?:string;revokedAt?:string;deletedAt?:string;starred?:boolean;reactions?:Record<string,string>;pollVotes?:Record<string,string[]>;forwarded?:boolean;viewOnce?:boolean};
   id: string;
   externalId: string;
   quotedExternalId?: string | null;
+  quotedMessageId?:string|null;
   direction: MessageDirectionValue;
   contentType: string;
   body: string | null;
@@ -2040,6 +2046,11 @@ export type CustomerStatusValue = 'ACTIVE' | 'INACTIVE' | 'PROSPECT';
 
 export interface Customer {
   id: string;
+  code: string;
+  country: string | null;
+  serviceName: string | null;
+  accountOwnerId: string | null;
+  accountOwner?: { id: string; name: string; username: string; isActive: boolean } | null;
   displayName: string;
   primaryPhone: string | null;
   email: string | null;
@@ -2075,21 +2086,30 @@ export interface CustomerNote {
   createdAt: string;
 }
 
-export const customers = {
-  list: (params: { search?: string; status?: CustomerStatusValue; limit?: number; offset?: number } = {}) => {
+export interface CustomerInput { displayName: string; code?: string; primaryPhone?: string | null; email?: string | null; company?: string | null; country?: string | null; serviceName?: string | null; accountOwnerId?: string | null; status?: CustomerStatusValue }
+export interface CustomerQuery { search?: string; status?: CustomerStatusValue; limit?: number; offset?: number; country?: string; accountOwnerId?: string; unassigned?: string }
+function customerQuery(params: CustomerQuery) {
     const query = new URLSearchParams();
     if (params.search) query.set('search', params.search);
     if (params.status) query.set('status', params.status);
+    if (params.country) query.set('country', params.country);
+    if (params.accountOwnerId) query.set('accountOwnerId', params.accountOwnerId);
+    if (params.unassigned) query.set('unassigned',params.unassigned);
     query.set('limit', String(params.limit ?? 50));
     if (params.offset) query.set('offset', String(params.offset));
-    return api.get<{ items: Customer[]; total: number }>(`/customers?${query.toString()}`);
-  },
+    return query.toString();
+}
+export const customers = {
+  list: (params: CustomerQuery = {}) => api.get<{ items: Customer[]; total: number }>(`/customers?${customerQuery(params)}`),
+  exportUrl: (params: CustomerQuery = {}) => `${API_URL}/api/v1/customers/directory/export?${customerQuery(params)}`,
+  templateUrl: `${API_URL}/api/v1/customers/directory/template`,
+  owners: () => api.get<{ items: Array<{ id: string; name: string; username: string }> }>('/customers/directory/owners'),
   get: (id: string) => api.get<CustomerWithTags>(`/customers/${id}`),
-  create: (input: { displayName: string; primaryPhone?: string; email?: string; company?: string }) =>
+  create: (input: CustomerInput) =>
     api.post<Customer>('/customers', input),
   update: (
     id: string,
-    input: Partial<{ displayName: string; primaryPhone: string; email: string; company: string; status: CustomerStatusValue }>,
+    input: Partial<Omit<CustomerInput,'code'>>,
   ) => api.patch<Customer>(`/customers/${id}`, input),
   identities: (customerId: string) =>
     api.get<{ items: CustomerIdentity[]; total: number }>(`/customers/identities/list?customerId=${customerId}`),

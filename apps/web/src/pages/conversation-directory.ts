@@ -114,6 +114,8 @@ export function buildDirectory(
   );
 
   return filtered.sort((a, b) => {
+    const pin=Number(Boolean(b.conversation?.isPinned))-Number(Boolean(a.conversation?.isPinned));
+    if(pin) return pin;
     // Anything with activity outranks anything without; then newest first.
     if (a.lastActivityAt && b.lastActivityAt) return b.lastActivityAt.localeCompare(a.lastActivityAt);
     if (a.lastActivityAt) return -1;

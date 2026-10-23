@@ -25,6 +25,7 @@ import {
   ConversationStatus,
 } from './conversation-states';
 import { CustomerService } from './customer.service';
+import { InboxService } from './inbox.service';
 import { TaggableEntity } from './entities/customer-metadata.entity';
 import { QueryBoolean } from '../../common/http/query-boolean';
 
@@ -105,22 +106,23 @@ export class ConversationsController {
     private readonly conversations: ConversationService,
     private readonly customers: CustomerService,
     private readonly audit: AuditService,
+    private readonly inbox: InboxService,
   ) {}
 
   @Get()
   @RequirePermissions('conversations.read')
   @ApiOperation({ summary: 'The inbox query — paginated, filterable, searchable' })
-  async list(@Query() query: ListConversationsDto) {
-    return this.conversations.list(query);
+  async list(@Query() query: ListConversationsDto,@CurrentUser() user:AuthenticatedUser) {
+    return this.conversations.list(query,user.id);
   }
 
   @Get(':id')
   @RequirePermissions('conversations.read')
   @ApiOperation({ summary: 'One conversation, including its derived PROJECT_SPEC.md §7 state and tags' })
-  async findOne(@Param('id') id: string) {
+  async findOne(@Param('id') id: string,@CurrentUser() user:AuthenticatedUser) {
     const conversation = await this.conversations.findOne(id);
     const tags = await this.customers.listTagsFor(TaggableEntity.CONVERSATION, id);
-    return { ...this.conversations.withSpecState(conversation), tags };
+    return { ...this.conversations.withSpecState(conversation), tags, ...(await this.inbox.metadata([id],user.id)).get(id)! };
   }
 
   @Get(':id/messages')

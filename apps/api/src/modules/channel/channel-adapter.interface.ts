@@ -22,8 +22,11 @@ import type { VerifiedWebhook, WebhookAccountRef } from './webhook.types';
 
 /** Channel-neutral inbound message, normalised by the adapter. */
 export interface NormalizedInboundMessage {
+  presentation?:Record<string,unknown>;
   /** The platform's own message id. Half of the idempotency key with `channelAccountId`. */
   externalId: string;
+  externalIdAliases?:string[];
+  quotedExternalIdAliases?:string[];
   channelAccountId: string;
   /** The platform's conversation/chat identifier. */
   externalConversationId: string;
@@ -74,6 +77,7 @@ export interface InboundAttachment {
 }
 
 export interface OutboundMessageRequest {
+  channelCommand?:ChannelCommand|null;
   channelAccountId: string;
   externalConversationId: string;
   body: string;
@@ -83,6 +87,8 @@ export interface OutboundMessageRequest {
   /** Deduplicates at the adapter boundary as well as in the database (`PROJECT_SPEC.md` §117). */
   idempotencyKey: string;
 }
+/** Trusted channel extension, created only by validated server workflows, never by the generic send DTO. */
+export interface ChannelCommand {name:string;args:Record<string,unknown>;files?:Record<string,{ref:string;name:string;mime:string}>}
 
 export interface OutboundAttachment {
   mimeType: string;
@@ -186,8 +192,12 @@ export interface NormalizedGroupDetail {
  * account does not support it — callers must not pre-suppose support.
  */
 export interface ChannelAdapter {
+  /** False when discovery is a limited snapshot; missing groups must remain active. */
+  readonly groupDiscoveryComplete?:boolean;
+  normalizeMessageMutation?(event:string,data:Record<string,unknown>):import('../messaging/message-presentation.service').MessageMutation|null;
+  normalizeDeliveryReceipts?(eventType:string,data:Record<string,unknown>):NormalizedDeliveryReceipt[];
   readonly channelKey: ChannelKey;
-  /** Stable adapter identifier stored on `channels.adapterKey`, e.g. `openwa`. */
+  /** Stable adapter identifier stored on `channels.adapterKey`, e.g. `gowa`. */
   readonly adapterKey: string;
 
   /** Probed on connect, never assumed. Stored on the account row. */

@@ -1,9 +1,9 @@
 # Support CRM
 
 WhatsApp-first Support CRM: automation + knowledge base + AI + human escalation + analytics,
-built on the [OpenWA](https://github.com/rmyndharis/OpenWA) gateway.
+using the [Go WhatsApp](https://github.com/aldinokemal/go-whatsapp-web-multidevice) gateway.
 
-`PROJECT_SPEC.md` is the canonical specification. Nothing in this repository overrides it.
+`PROJECT_SPEC.md` is the canonical specification. The owner-directed Go WhatsApp replacement is recorded in [the migration decision](docs/GOWA-MIGRATION.md); the original specification is preserved.
 
 The active documentation system separates [business requirements](docs/01-BRD.md),
 [product requirements](docs/02-PRD.md), [technical requirements](docs/03-TRD.md),
@@ -12,6 +12,10 @@ The active documentation system separates [business requirements](docs/01-BRD.md
 [API contracts](docs/08-API-CONTRACTS.md), [implementation phases](docs/09-IMPLEMENTATION-PLAN.md)
 and [testing/deployment](docs/10-TESTING-DEPLOYMENT.md). Run `pnpm docs:check`
 and `pnpm design:check` to verify reference drift and core theme contrast.
+
+## Current WhatsApp implementation
+
+Open **WhatsApp** in the main menu for chats, status updates, channels, groups, scheduled messages, linked devices/QR and all feature tools. The release-derived [feature map](docs/GOWA-FEATURE-MAP.md) records 97 native operations and their managed workflows. Source now selects Go WhatsApp; the owner deferred Docker/runtime tests, so the previously running localhost stack has not been cut over. A later rebuild/migration and owner-controlled relinking are required. Earlier test/QR evidence below belongs to previous phases.
 
 ## Implementation status
 
@@ -78,9 +82,7 @@ gateway, and a pairing code travels gateway → API → browser.
 - **PostgreSQL** — the source of truth for everything.
 - **Redis** — queues, distributed locks, rate limits, job progress, dedupe. Never a source of
   truth (`PROJECT_SPEC.md` §184).
-- **`gateway/`** — an unmodified clone of OpenWA, built and run as the `openwa` service in this
-  stack. Extension happens through its hook/plugin system so the fork stays mergeable. Only
-  `modules/channel/whatsapp` may talk to it, enforced by an ESLint rule.
+- **Go WhatsApp v9.6.0** - pinned upstream image as internal service `gowa`; its browser UI and independent senders are disabled. The only gateway boundary is `modules/channel/whatsapp`. The former vendored gateway is removed; `gateway/README.md` points to the new source/contract/license.
 
 ## Requirements
 
@@ -99,7 +101,7 @@ Generate the two secrets and put them in `.env` (`SECRET_ENCRYPTION_KEY`, `SESSI
 node -e "console.log(require('crypto').randomBytes(32).toString('base64'))"
 ```
 
-Also set `OPENWA_API_KEY` (same generator) — the CRM and the WhatsApp gateway share it — and a real
+Also set `GOWA_BASIC_AUTH` (`crm:<random password>`) — the CRM and the WhatsApp gateway share it — and a real
 `SEED_ADMIN_PASSWORD`.
 
 Then bring the whole stack up. This migrates, seeds, and starts the console, API, worker and the
@@ -191,7 +193,7 @@ docker compose up -d --scale worker=3
 ```
 PROJECT_SPEC.md      canonical specification — never edited by implementation
 docs/                audit, implementation plan, ADRs
-gateway/             unmodified OpenWA clone (its own compose file; not started by ours)
+gateway/             pointer to the pinned Go WhatsApp provider and migration guide
 apps/api/            the Support CRM monolith — API and worker run modes
   src/common/        crypto, redis (locks, rate limits), logging with secret redaction
   src/config/        env validation and typed configuration

@@ -71,6 +71,8 @@ export function onChannelStatus(handler: (event: StatusChangedEvent) => void): (
   };
 }
 
+export function onWhatsAppPresence(handler:(event:{channelAccountId:string;externalConversationId:string;state:string;recording:boolean})=>void){const client=getSocket();const subscribe=()=>client.emit('subscribe:channel',{});subscribe();client.on('connect',subscribe);client.on('whatsapp.chat.presence',handler);return()=>{client.off('connect',subscribe);client.off('whatsapp.chat.presence',handler);};}
+
 export interface ConversationEvent {
   event: string;
   at: string;
@@ -101,7 +103,8 @@ export function onConversationEvent(conversationId: string | null, handler: (eve
   ];
 
   const subscribe = () => client.emit('subscribe:conversation', conversationId ? { conversationId } : {});
-  const forward = (payload: ConversationEvent) => handler(payload);
+  let timer:ReturnType<typeof setTimeout>|undefined;
+  const forward=(payload:ConversationEvent)=>{if(conversationId&&payload.conversationId!==conversationId)return;if(timer)clearTimeout(timer);timer=setTimeout(()=>handler(payload),120);};
 
   subscribe();
   client.on('connect', subscribe);
@@ -109,6 +112,7 @@ export function onConversationEvent(conversationId: string | null, handler: (eve
 
   return () => {
     client.off('connect', subscribe);
+    if(timer)clearTimeout(timer);
     events.forEach((event) => client.off(event, forward));
   };
 }

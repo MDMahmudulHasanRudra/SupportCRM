@@ -128,7 +128,7 @@ export class GroupSyncService {
         }
       }
 
-      const goneIds = existing.filter((g) => g.isActive && !seenIds.has(g.externalId)).map((g) => g.id);
+      const goneIds = adapter.groupDiscoveryComplete===false?[]:existing.filter((g) => g.isActive && !seenIds.has(g.externalId)).map((g) => g.id);
       if (goneIds.length > 0) {
         await this.groups.update({ id: In(goneIds) }, { isActive: false });
       }

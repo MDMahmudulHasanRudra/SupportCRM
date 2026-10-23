@@ -31,7 +31,7 @@ export class Channel {
   @Column({ type: 'boolean', default: false })
   isEnabled!: boolean;
 
-  /** Which adapter implements it, e.g. `openwa`. Null until an adapter exists. */
+  /** Which adapter implements it, e.g. `gowa`. Null until an adapter exists. */
   @Column({ type: 'varchar', length: 64, nullable: true })
   adapterKey!: string | null;
 

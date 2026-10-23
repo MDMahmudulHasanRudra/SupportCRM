@@ -1,6 +1,6 @@
 import { Injectable } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
-import { Repository } from 'typeorm';
+import { In,Repository } from 'typeorm';
 import { MetricsService } from '../../common/metrics/metrics.service';
 import { ConversationResolverService } from '../crm/conversation-resolver.service';
 import { MessageClassification as Classification } from './message-types';
@@ -53,7 +53,9 @@ export class InboundMessageService {
     account: ChannelAccount,
     normalized: NormalizedInboundMessage,
     providerEventId: string | null,
+    options:{historical?:boolean}={},
   ): Promise<PersistInboundResult> {
+    if(normalized.externalIdAliases?.length){const existing=await this.messages.findOne({where:{channelAccountId:account.id,externalId:In(normalized.externalIdAliases.slice(0,8))}});if(existing)return {message:existing,duplicate:true};}
     const group = normalized.externalGroupId
       ? await this.groups.findOne({
           where: { channelAccountId: account.id, externalId: normalized.externalGroupId },
@@ -68,7 +70,7 @@ export class InboundMessageService {
     // way, so a later backfill can link it.
     const quoted = normalized.quotedExternalId
       ? await this.messages.findOne({
-          where: { channelAccountId: account.id, externalId: normalized.quotedExternalId },
+          where: { channelAccountId: account.id, externalId: In(normalized.quotedExternalIdAliases?.slice(0,8)??[normalized.quotedExternalId]) },
           select: { id: true },
         })
       : null;
@@ -87,6 +89,7 @@ export class InboundMessageService {
           channelKey: account.channelKey as ChannelKey,
           channelAccountId: account.id,
           externalId: normalized.externalId,
+        presentation:normalized.presentation??{},
           externalConversationId: normalized.externalConversationId,
           externalGroupId: normalized.externalGroupId,
           groupId: group?.id ?? null,
@@ -147,7 +150,7 @@ export class InboundMessageService {
     await this.conversationResolver.recordActivity(resolved.conversation, {
       at: normalized.sentAt,
       inbound: !normalized.fromMe,
-      fromCustomer: classification === Classification.CUSTOMER_MESSAGE,
+      fromCustomer: !options.historical&&classification === Classification.CUSTOMER_MESSAGE,
     });
 
     if (resolved.created) this.conversationResolver.emitCreated(resolved.conversation);

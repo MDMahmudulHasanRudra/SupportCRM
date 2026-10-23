@@ -1,5 +1,5 @@
 import { Processor, WorkerHost } from '@nestjs/bullmq';
-import { Injectable } from '@nestjs/common';
+import { Injectable,Optional } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
 import type { Job } from 'bullmq';
 import { Repository } from 'typeorm';
@@ -16,6 +16,8 @@ import { QUEUES } from '../jobs/queues';
 import { Conversation } from '../crm/entities/conversation.entity';
 import { DecisionService } from '../decision/decision.service';
 import { RealtimeGateway } from '../realtime/realtime.gateway';
+import { ChannelLabelService,type NormalizedChannelLabel } from './channel-label.service';
+import { MessagePresentationService } from './message-presentation.service';
 import { InboundMessageService } from './inbound-message.service';
 import { DeliveryService } from './delivery.service';
 import { MessageClassification, MessageProcessingStatus } from './message-types';
@@ -69,6 +71,8 @@ export class InboundProcessor extends WorkerHost {
     private readonly metrics: MetricsService,
     @InjectRepository(Conversation) private readonly conversations: Repository<Conversation>,
     private readonly decisions: DecisionService,
+    @Optional()private readonly presentation?:MessagePresentationService,
+    @Optional()private readonly labels?:ChannelLabelService,
   ) {
     super();
   }
@@ -132,6 +136,11 @@ export class InboundProcessor extends WorkerHost {
         await this.handleMessage(event, account, envelope);
         return;
 
+      case 'channel.label':
+        await this.labels?.apply(account.id,envelope.data as unknown as NormalizedChannelLabel);await this.finish(event,ProviderEventStatus.PROCESSED);return;
+      case 'chat_presence':
+        this.realtime.emitWhatsAppEvent('whatsapp.chat.presence',{channelAccountId:account.id,...envelope.data});await this.finish(event,ProviderEventStatus.PROCESSED);return;
+
       case 'message.ack':
         await this.handleAck(event, account, envelope.data);
         return;
@@ -156,12 +165,11 @@ export class InboundProcessor extends WorkerHost {
         await this.finish(event, ProviderEventStatus.PROCESSED);
         return;
 
-      case 'message.revoked':
-        // Deliberately not deleting the original: a message the customer deleted is still part of
-        // the support record, and silently erasing history would break the audit trail
-        // (`PROJECT_SPEC.md` §127 — no automatic deletion of business data).
-        await this.finish(event, ProviderEventStatus.PROCESSED);
-        return;
+      case 'message.revoked':case 'message.edited':case 'message.deleted':case 'message.reaction': {
+        const change=this.registry.get(account.channelKey as ChannelKey).normalizeMessageMutation?.(event.eventType,envelope.data);
+        if(change)await this.presentation?.apply(account.id,change);
+        await this.finish(event,ProviderEventStatus.PROCESSED);return;
+      }
 
       default:
         await this.finish(event, ProviderEventStatus.IGNORED, `Unhandled event type ${event.eventType}`);
@@ -176,6 +184,7 @@ export class InboundProcessor extends WorkerHost {
     const normalized = this.registry
       .get(account.channelKey as ChannelKey)
       .normalizeInboundMessage(account, envelope);
+    const mutation=this.registry.get(account.channelKey as ChannelKey).normalizeMessageMutation?.(event.eventType,envelope.data);if(mutation)await this.presentation?.apply(account.id,mutation);
     if (!normalized) {
       // A status broadcast or an unaddressable payload. Normal, not an error.
       await this.finish(event, ProviderEventStatus.IGNORED, 'Not a conversation message');
@@ -260,16 +269,16 @@ export class InboundProcessor extends WorkerHost {
     data: Record<string, unknown>,
   ): Promise<void> {
     // The adapter interprets the provider's payload; this method never sees its shape.
-    const receipt = this.registry
-      .get(account.channelKey as ChannelKey)
-      .normalizeDeliveryReceipt(event.eventType, data);
+    const adapter=this.registry.get(account.channelKey as ChannelKey);
+    const single=adapter.normalizeDeliveryReceipt(event.eventType,data);
+    const receipts=adapter.normalizeDeliveryReceipts?.(event.eventType,data)??(single?[single]:[]);
 
-    if (!receipt) {
+    if (!receipts.length) {
       await this.finish(event, ProviderEventStatus.IGNORED, 'Unmappable delivery receipt');
       return;
     }
 
-    await this.delivery.applyReceipt(account.id, receipt.externalMessageId, receipt.status);
+    for(const receipt of receipts)await this.delivery.applyReceipt(account.id, receipt.externalMessageId, receipt.status);
     await this.finish(event, ProviderEventStatus.PROCESSED);
   }
 

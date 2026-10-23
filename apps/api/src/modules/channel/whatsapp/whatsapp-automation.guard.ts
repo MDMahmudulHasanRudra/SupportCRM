@@ -1,6 +1,7 @@
 import { Injectable } from '@nestjs/common';
 import { AppLogger } from '../../../common/logging/app-logger';
-import { OpenWaClient, OpenWaError } from './openwa.client';
+import { GatewayError } from './gateway-error';
+import { GoWaClient } from './gowa.client';
 
 export interface AutomationGuardResult {
   /** False when the gateway holds active autoreply rules for this session. */
@@ -11,34 +12,15 @@ export interface AutomationGuardResult {
   detail: string;
 }
 
-/**
- * Refuses to operate a gateway session that is also autoreplying on its own (Phase 2 brief §13).
- *
- * The vendored gateway ships `src/modules/automation/` — a per-session autoreply engine that
- * evaluates every inbound message and **sends a reply directly through its own send path**. If a
- * rule were ever configured on a session Support CRM owns, a customer would receive two answers to
- * one question: the gateway's canned reply, and later whatever the Message Decision Engine decided.
- * Both would be sent, neither would know about the other, and no amount of care on our side of the
- * boundary would prevent it (`docs/adr/0001` §6).
- *
- * The protection is threefold:
- *  1. **`OpenWaClient` has no method to create, update or enable a rule.** Only `listAutomationRules`
- *     exists. The capability is absent from the codebase, so it cannot be reached by accident.
- *  2. **This guard reads the gateway's rules** and reports whether any is enabled.
- *  3. **Existing rules are never modified.** The brief is explicit — do not silently change a
- *     customer's system. We detect, refuse, and tell the operator; the decision to delete a rule
- *     stays theirs.
- *
- * An unreachable gateway yields `safe: false` with `activeRuleCount: null`. Treating "I could not
- * check" as "it is fine" is precisely the failure this guard exists to prevent.
- */
+/** Verifies the managed deployment policy; the provider has no remote auto-reply config probe. */
 @Injectable()
 export class WhatsAppAutomationGuard {
   private readonly logger = new AppLogger(WhatsAppAutomationGuard.name);
 
-  constructor(private readonly client: OpenWaClient) {}
+  constructor(private readonly client: GoWaClient) {}
 
   async check(sessionId: string | null): Promise<AutomationGuardResult> {
+    if(this.client.autonomousReplyDisabled!==true)return {safe:false,activeRuleCount:null,ruleNames:[],detail:'Configure the managed Go WhatsApp deployment with autonomous replies disabled before connecting CRM accounts.'};
     // No session yet means nothing can be autoreplying on it. This is the normal state between
     // registering an account and connecting it.
     if (!sessionId) {
@@ -59,7 +41,7 @@ export class WhatsAppAutomationGuard {
           safe: true,
           activeRuleCount: 0,
           ruleNames: [],
-          detail: 'No gateway automation rules are enabled for this session.',
+          detail: 'Managed gateway deployment declares autonomous replies disabled; CRM controls automation. This is a deployment-policy check, not a remote configuration probe.',
         };
       }
 
@@ -82,7 +64,7 @@ export class WhatsAppAutomationGuard {
       };
     } catch (error) {
       // 400 as well as 404 — see the note in whatsapp.adapter.ts on the gateway's uuid validation.
-      if (error instanceof OpenWaError && (error.status === 404 || error.status === 400)) {
+      if (error instanceof GatewayError && (error.status === 404 || error.status === 400)) {
         // No such session yet — nothing can be autoreplying on it.
         return {
           safe: true,

@@ -22,6 +22,8 @@ import { ChannelConnectionState } from '../channel-connection';
 @Entity('channel_accounts')
 @Index(['channelKey', 'externalId'], { unique: true })
 export class ChannelAccount {
+  @Column({type:'varchar',length:32,default:'gowa'})
+  gatewayProvider!:string;
   @PrimaryGeneratedColumn('uuid')
   id!: string;
 

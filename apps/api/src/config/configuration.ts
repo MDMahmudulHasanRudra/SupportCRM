@@ -13,6 +13,7 @@ export interface AppConfig {
   timezone: string;
   http: {
     port: number;
+    publicUrl:string;
     baseUrl: string;
     corsOrigins: string[];
     enableSwagger: boolean;
@@ -72,11 +73,7 @@ export interface AppConfig {
     /** Test-only: drives the scripted provider. Never set outside the suite. */
     testScript?: Record<string, unknown>;
   };
-  openwa: {
-    baseUrl: string;
-    apiKey?: string;
-    webhookSecret?: string;
-  };
+  gowa: { baseUrl:string; basicAuth:string; managedAutomationDisabled:boolean; linkPreviewHosts:string[] };
   seed: {
     adminEmail: string;
     adminUsername: string;
@@ -96,6 +93,7 @@ export function configuration(): AppConfig {
     http: {
       port: Number(env.API_PORT),
       baseUrl: env.API_BASE_URL,
+      publicUrl:env.CRM_PUBLIC_URL??'http://localhost:12000',
       corsOrigins: String(env.CORS_ORIGINS)
         .split(',')
         .map((o) => o.trim())
@@ -154,11 +152,7 @@ export function configuration(): AppConfig {
       temperature: Number(env.AI_TEMPERATURE),
       maxTokens: Number(env.AI_MAX_TOKENS),
     },
-    openwa: {
-      baseUrl: env.OPENWA_BASE_URL,
-      apiKey: env.OPENWA_API_KEY || undefined,
-      webhookSecret: env.OPENWA_WEBHOOK_SECRET || undefined,
-    },
+    gowa: { baseUrl:env.GOWA_BASE_URL??'http://localhost:3001',basicAuth:env.GOWA_BASIC_AUTH??'',managedAutomationDisabled:env.GOWA_MANAGED_AUTOMATION_DISABLED==='true',linkPreviewHosts:String(env.GOWA_LINK_PREVIEW_HOSTS??'').split(',').map(host=>host.trim().toLowerCase()).filter(Boolean) },
     seed: {
       adminEmail: env.SEED_ADMIN_EMAIL,
       adminUsername: env.SEED_ADMIN_USERNAME,

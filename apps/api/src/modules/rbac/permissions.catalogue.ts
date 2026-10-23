@@ -36,6 +36,8 @@ export const PERMISSIONS: readonly PermissionDefinition[] = [
   // --- Customers & team -----------------------------------------------------
   { key: 'customers.read', label: 'View customers', category: 'CRM' },
   { key: 'customers.manage', label: 'Manage customers', category: 'CRM' },
+  { key: 'customers.import', label: 'Import customers', category: 'CRM' },
+  { key: 'customers.export', label: 'Export customers', category: 'CRM' },
   { key: 'team.manage', label: 'Manage support team members', category: 'CRM' },
 
   // --- Broadcast ------------------------------------------------------------

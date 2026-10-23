@@ -1,5 +1,7 @@
 # Workspace release: installation and verification
 
+Directory/inbox continuation (23 October): apply `1788400002000-CustomerDirectory` and `1788400003000-InboxReading` before running the updated API/worker. Seed the new `customers.import`/`customers.export` permission catalogue; existing role grants are preserved and can be granted through Users & access. New client CSV preview/import/export and private Inbox reading/archive/shared-pin workflows have real server behavior. Current evidence and runtime limits are in `09-IMPLEMENTATION-PLAN.md` and `NEXT-SESSION.md`; the older counts and Docker runtime below describe the previous checkpoint.
+
 Latest continuation: Windows source preview starts with `./scripts/start-local.ps1` at `http://localhost:12000`; it requires the additional `1788400001000-ShiftLifecycle` migration. Current verification includes 36 frontend tests, 15 workspace integration tests, eight browser layout/navigation tests and two additional browser sign-in/real-QR tests. The QR-only session was stopped without scanning a phone. See [next-session handoff](NEXT-SESSION.md) for the exact checkpoint and remaining work; older counts below are historical.
 
 For the later shared-theme/navigation and web account-control update, use the [current documentation index](README.md) and [phase acceptance record](09-IMPLEMENTATION-PLAN.md). The results below describe the earlier workspace expansion.

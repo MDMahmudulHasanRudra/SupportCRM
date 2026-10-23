@@ -2,9 +2,7 @@ import { Body, Controller, Get, Param, Patch, Post, Query, Req } from '@nestjs/c
 import { ApiOperation, ApiTags } from '@nestjs/swagger';
 import { Type } from 'class-transformer';
 import {
-  IsArray,
   IsBoolean,
-  IsEmail,
   IsEnum,
   IsInt,
   IsOptional,
@@ -22,31 +20,9 @@ import { ChannelKey } from '../channel/entities/channel.entity';
 import { CurrentUser, RequirePermissions } from '../rbac/permissions.guard';
 import { CustomerService } from './customer.service';
 import { IdentityMatchState } from './entities/customer-identity.entity';
-import { CustomerStatus } from './entities/customer.entity';
+import { CreateCustomerDto, ListCustomersDto, UpdateCustomerDto } from './customer-fields.dto';
+export { CreateCustomerDto, ListCustomersDto, UpdateCustomerDto } from './customer-fields.dto';
 import { TaggableEntity } from './entities/customer-metadata.entity';
-
-export class CreateCustomerDto {
-  @IsString() @MinLength(1) @MaxLength(190) displayName!: string;
-  @IsOptional() @IsString() @MaxLength(32) primaryPhone?: string;
-  @IsOptional() @IsEmail() @MaxLength(255) email?: string;
-  @IsOptional() @IsString() @MaxLength(190) company?: string;
-}
-
-export class UpdateCustomerDto {
-  @IsOptional() @IsString() @MinLength(1) @MaxLength(190) displayName?: string;
-  @IsOptional() @IsString() @MaxLength(32) primaryPhone?: string;
-  @IsOptional() @IsEmail() @MaxLength(255) email?: string;
-  @IsOptional() @IsString() @MaxLength(190) company?: string;
-  @IsOptional() @IsEnum(CustomerStatus) status?: CustomerStatus;
-}
-
-export class ListCustomersDto {
-  @IsOptional() @IsString() @MaxLength(120) search?: string;
-  @IsOptional() @IsEnum(CustomerStatus) status?: CustomerStatus;
-  @IsOptional() @IsArray() @IsString({ each: true }) tagKeys?: string[];
-  @IsOptional() @Type(() => Number) @IsInt() @Min(1) @Max(100) limit?: number;
-  @IsOptional() @Type(() => Number) @IsInt() @Min(0) offset?: number;
-}
 
 export class CreateIdentityDto {
   @IsEnum(ChannelKey) channelKey!: ChannelKey;

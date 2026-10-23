@@ -132,11 +132,12 @@ export const envSchema = z
     AI_TEMPERATURE: z.coerce.number().min(0).max(2).optional().default(0.2),
     AI_MAX_TOKENS: z.coerce.number().int().min(64).max(8192).optional().default(700),
 
-    // --- OpenWA gateway (contract only in Phase 1; used from Phase 2) ------
-    OPENWA_BASE_URL: z.string().url().default('http://localhost:2785'),
-    OPENWA_API_KEY: z.string().optional(),
-    /** Shared secret the gateway signs webhook bodies with (X-OpenWA-Signature). */
-    OPENWA_WEBHOOK_SECRET: z.string().optional(),
+    // Active WhatsApp transport: Go WhatsApp. Legacy OPENWA_* values are unused.
+    GOWA_BASE_URL: z.string().url().default('http://localhost:3001'),
+    CRM_PUBLIC_URL:z.string().url().default('http://localhost:12000'),
+    GOWA_LINK_PREVIEW_HOSTS:z.string().default(''),
+    GOWA_BASIC_AUTH: z.string().optional().default(''),
+    GOWA_MANAGED_AUTOMATION_DISABLED: z.enum(['true','false']).default('false'),
 
     // --- Seed (development / first boot) ----------------------------------
     SEED_ADMIN_EMAIL: z.string().email().default('admin@example.com'),

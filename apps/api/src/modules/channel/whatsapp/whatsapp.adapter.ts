@@ -1,4 +1,4 @@
-import { ConflictException, Injectable, OnModuleInit } from '@nestjs/common';
+import { ConflictException, Injectable, OnModuleInit, Optional } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
 import { Repository } from 'typeorm';
 import { AppLogger } from '../../../common/logging/app-logger';
@@ -25,15 +25,17 @@ import type {
   OutboundMessageRequest,
   OutboundSendResult,
 } from '../channel-adapter.interface';
-import { OpenWaClient, OpenWaError } from './openwa.client';
+import { GatewayError } from './gateway-error';
+import { createHash } from 'node:crypto';
+import { GoWaClient } from './gowa.client';
+import { crmJid,providerJid,providerMessageId } from './gowa-identifiers';
+import { GoWaCommandExecutor } from './gowa-command.executor';
 import {
-  OPENWA_HEADERS,
   SUBSCRIBED_EVENTS,
   isSubscribedEvent,
   type OpenWaAckPayload,
   type OpenWaGroupDetail,
   type OpenWaIncomingMessage,
-  type OpenWaWebhookEnvelope,
 } from './openwa.contracts';
 import {
   extractPhone,
@@ -45,7 +47,7 @@ import {
   toDate,
   whatsAppCapabilities,
 } from './openwa.mappers';
-import { verifySignature, isWithinReplayWindow, SignatureFailure } from './openwa.signature';
+import { verifySignature, SignatureFailure } from './openwa.signature';
 import {
   WebhookRejectionReason,
   WebhookVerificationError,
@@ -86,7 +88,7 @@ const SIGNATURE_REASON: Record<SignatureFailure, WebhookRejectionReason> = {
 /**
  * The WhatsApp implementation of `ChannelAdapter`.
  *
- * Together with `OpenWaClient`, this is the boundary. Everything above it speaks in
+ * Together with `GoWaClient`, this is the boundary. Everything above it speaks in
  * `channelAccountId`, `externalConversationId` and `NormalizedInboundMessage`; everything below it
  * speaks in sessions, chat ids and JIDs. Nothing crosses in either direction untranslated.
  *
@@ -97,15 +99,17 @@ const SIGNATURE_REASON: Record<SignatureFailure, WebhookRejectionReason> = {
 @Injectable()
 export class WhatsAppChannelAdapter implements ChannelAdapter, OnModuleInit {
   readonly channelKey = ChannelKey.WHATSAPP;
-  readonly adapterKey = 'openwa';
+  readonly adapterKey = 'gowa';
+  readonly groupDiscoveryComplete=false;
 
   private readonly logger = new AppLogger(WhatsAppChannelAdapter.name);
 
   constructor(
-    private readonly client: OpenWaClient,
+    private readonly client: GoWaClient,
     private readonly crypto: CryptoService,
     private readonly registry: ChannelRegistryService,
     @InjectRepository(ChannelAccount) private readonly accounts: Repository<ChannelAccount>,
+    @Optional()private readonly commands?:GoWaCommandExecutor,
   ) {}
 
   onModuleInit(): void {
@@ -139,7 +143,7 @@ export class WhatsAppChannelAdapter implements ChannelAdapter, OnModuleInit {
       // 400 as well as 404: the gateway answers 400 "uuid is expected" for a malformed id and
       // 404 for a well-formed one it does not know. Both mean the same thing to us — there is
       // no live session — and treating only 404 as such is what broke Phase 2.
-      if (error instanceof OpenWaError && (error.status === 404 || error.status === 400)) {
+      if (error instanceof GatewayError && (error.status === 404 || error.status === 400)) {
         // The gateway has never heard of this session. DISCONNECTED, not ERROR: the row is simply
         // ahead of the gateway, which is the normal state right after registering an account.
         return {
@@ -216,7 +220,7 @@ export class WhatsAppChannelAdapter implements ChannelAdapter, OnModuleInit {
         await this.client.getSession(account.externalId);
         return account.externalId;
       } catch (error) {
-        if (!(error instanceof OpenWaError) || (error.status !== 404 && error.status !== 400)) throw error;
+        if (!(error instanceof GatewayError) || (error.status !== 404 && error.status !== 400)) throw error;
         // The stored id is stale (gateway rebuilt, session deleted). Fall through and re-resolve.
         this.logger.warn('Stored gateway session id is no longer valid; re-resolving by name', {
           channelAccountId: account.id,
@@ -243,6 +247,11 @@ export class WhatsAppChannelAdapter implements ChannelAdapter, OnModuleInit {
     const account = await this.loadAccount(channelAccountId);
     await this.client.stopSession(this.gatewaySessionId(account));
   }
+  async reconnect(channelAccountId:string):Promise<ChannelAccountState>{
+    const account=await this.loadAccount(channelAccountId);
+    const session=await this.client.reconnectSession(this.gatewaySessionId(account));
+    return this.toAccountState(session.id,session.status,session);
+  }
 
   /** Explicit unlink; callers must enforce confirmation, permissions and recovery intent. */
   async logout(channelAccountId: string): Promise<void> {
@@ -268,7 +277,7 @@ export class WhatsAppChannelAdapter implements ChannelAdapter, OnModuleInit {
       // 400 once the session is authenticated ("no QR code needed"), 404 before the engine has
       // produced one — and a client that polls while a dialog is open would otherwise turn every
       // one of those into a 500 and a stack trace in the log.
-      if (error instanceof OpenWaError && (error.status === 400 || error.status === 404)) {
+      if (error instanceof GatewayError && (error.status === 400 || error.status === 404)) {
         return { qr: null, state: account.status as ChannelConnectionState };
       }
       throw error;
@@ -335,7 +344,7 @@ export class WhatsAppChannelAdapter implements ChannelAdapter, OnModuleInit {
     const participants = (detail.participants ?? [])
       .filter((p) => Boolean(p?.id))
       .map((p) => ({
-        externalId: p.id,
+        externalId: crmJid(p.id),
         // `number` is the gateway's own field; fall back to parsing the JID when it is absent.
         phone: extractPhone(p.number) ?? extractPhone(p.id),
         displayName: sanitizeText(p.name, 190),
@@ -348,7 +357,7 @@ export class WhatsAppChannelAdapter implements ChannelAdapter, OnModuleInit {
         name: sanitizeText(detail.name, 255) ?? detail.id,
         description: sanitizeText(detail.description, 4000),
         memberCount: participants.length,
-        ownerExternalId: detail.owner ?? null,
+        ownerExternalId: detail.owner?crmJid(detail.owner):null,
         // Both spellings appear in the gateway's own contract; either means members cannot post.
         isAnnounceOnly: Boolean(detail.isAnnounce ?? detail.announce),
       },
@@ -373,6 +382,15 @@ export class WhatsAppChannelAdapter implements ChannelAdapter, OnModuleInit {
     const capabilities = normalizeCapabilities(account.capabilities);
 
     try {
+      if(request.channelCommand){
+        if(!this.commands)throw Error('WhatsApp tools are not available.');
+        assertCapability(capabilities,'canSendText',account.id);
+        if(/^send(Image|Audio|Video|File|Sticker)$/.test(request.channelCommand.name))assertCapability(capabilities,'canSendMedia',account.id);
+        if(request.channelCommand.name==='sendFile')assertCapability(capabilities,'canSendDocument',account.id);
+        const result=await this.commands.execute(this.gatewaySessionId(account),request.channelCommand,true);
+        if(typeof result.message_id!=='string')return {externalId:null,status:'failed',error:'Provider outcome is unknown: no message ID was returned. Inspect history before retrying.'};
+        return {externalId:result.message_id,status:'sent'};
+      }
       const attachment = request.attachments?.[0];
 
       if (attachment) {
@@ -380,18 +398,10 @@ export class WhatsAppChannelAdapter implements ChannelAdapter, OnModuleInit {
         const isDocument = !attachment.mimeType.startsWith('image/');
         if (isDocument) assertCapability(capabilities, 'canSendDocument', account.id);
 
-        const payload = {
-          chatId: request.externalConversationId,
-          url: attachment.storageRef,
-          mimetype: attachment.mimeType,
-          filename: attachment.filename,
-          caption: request.body ?? attachment.caption,
-          quotedMessageId: request.quotedExternalId ?? undefined,
-        };
-        const result = isDocument
-          ? await this.client.sendDocument(this.gatewaySessionId(account), payload)
-          : await this.client.sendImage(this.gatewaySessionId(account), payload);
-        return { externalId: result.messageId, status: 'sent' };
+        if(!this.commands)throw Error('WhatsApp media transport is unavailable.');
+        const field=isDocument?'file':'image';
+        const result=await this.commands.execute(this.gatewaySessionId(account),{name:isDocument?'sendFile':'sendImage',args:{parameters:{},body:{phone:request.externalConversationId,caption:request.body??attachment.caption,[field]:'stored-upload',...(request.quotedExternalId?{reply_message_id:request.quotedExternalId}:{})}},files:{[field]:{ref:attachment.storageRef,name:attachment.filename,mime:attachment.mimeType}}},true);
+        return {externalId:typeof result.message_id==='string'?result.message_id:null,status:typeof result.message_id==='string'?'sent':'failed',error:typeof result.message_id==='string'?undefined:'Provider outcome unknown. Inspect history before retrying.'};
       }
 
       assertCapability(capabilities, 'canSendText', account.id);
@@ -412,7 +422,7 @@ export class WhatsAppChannelAdapter implements ChannelAdapter, OnModuleInit {
       });
       return { externalId: result.messageId, status: 'sent' };
     } catch (error) {
-      if (error instanceof OpenWaError) {
+      if (error instanceof GatewayError) {
         return {
           externalId: null,
           status: 'failed',
@@ -468,48 +478,47 @@ export class WhatsAppChannelAdapter implements ChannelAdapter, OnModuleInit {
   ): Promise<VerifiedWebhook> {
     const secret = this.decryptWebhookSecret(account);
 
-    const signature = verifySignature(rawBody, headers[OPENWA_HEADERS.SIGNATURE], secret);
+    const signature = verifySignature(rawBody, headers['x-hub-signature-256'], secret);
     if (!signature.valid) throw new WebhookVerificationError(SIGNATURE_REASON[signature.reason]);
 
-    let envelope: OpenWaWebhookEnvelope;
+    let wire: {event:string;device_id?:string;session_id?:string;timestamp?:string;payload:Record<string,unknown>};
     try {
-      envelope = JSON.parse(rawBody.toString('utf8')) as OpenWaWebhookEnvelope;
+      wire = JSON.parse(rawBody.toString('utf8'));
     } catch {
       throw new WebhookVerificationError(WebhookRejectionReason.MALFORMED_BODY);
     }
 
-    if (!envelope || typeof envelope !== 'object' || typeof envelope.event !== 'string') {
+    if (!wire || typeof wire !== 'object' || typeof wire.event !== 'string'||!wire.payload||typeof wire.payload!=='object'||Array.isArray(wire.payload)) {
       throw new WebhookVerificationError(WebhookRejectionReason.MALFORMED_BODY);
     }
-    // The signature covers the timestamp, so it cannot be altered without breaking the HMAC —
-    // which is exactly what makes it usable as a freshness bound.
-    if (!isWithinReplayWindow(envelope.timestamp)) {
-      throw new WebhookVerificationError(WebhookRejectionReason.REPLAY_WINDOW);
-    }
-    // A body whose sessionId disagrees with the account whose secret verified it would mean one
-    // session's secret being used to inject events into another. Signed or not, refuse it.
-    if (envelope.sessionId && envelope.sessionId !== account.externalId) {
+    if (wire.session_id && wire.session_id !== account.externalId) {
       throw new WebhookVerificationError(WebhookRejectionReason.MALFORMED_BODY);
     }
-
-    const header = (name: string): string | null => {
-      const value = headers[name];
-      const single = Array.isArray(value) ? value[0] : value;
-      return single ? single.slice(0, 190) : null;
-    };
-
+    if(!wire.session_id){
+      const own=await this.accounts.findOne({where:{id:account.id}});
+      if(!wire.device_id||!own?.accountPhone||extractPhone(wire.device_id)!==own.accountPhone)throw new WebhookVerificationError(WebhookRejectionReason.MALFORMED_BODY);
+    }
+    const p=wire.payload;
+    const event=wire.event.startsWith('label.')?'channel.label':wire.event==='message'?(p.is_from_me?'message.sent':'message.received'):wire.event==='group.participants'||wire.event==='group.joined'?'group.update':wire.event;
+    const mediaType=['image','video','audio','document','sticker','video_note'].find(key=>p[key]);
+    const media=mediaType?p[mediaType!]:undefined;
+    const descriptor=media&&typeof media==='object'?media as Record<string,unknown>:{};
+    const data:Record<string,unknown>=wire.event==='message'?{
+      id:p.id,chatId:crmJid(p.chat_id),from:crmJid(p.from),author:crmJid(p.from),isGroup:String(p.chat_id??'').endsWith('@g.us'),fromMe:p.is_from_me,
+      body:p.body??descriptor.caption??null,type:mediaType==='video_note'?'video':mediaType??(p.contact?'vcard':p.location?'location':'chat'),timestamp:p.timestamp,
+      contact:{pushname:p.sender_display_name??p.from_name},quotedMessage:p.replied_to_id?{id:p.replied_to_id}:undefined,mentionedIds:p.mentions,
+      isStatusBroadcast:p.chat_id==='status@broadcast',media:mediaType?{mimetype:descriptor.mime_type??`${mediaType==='document'?'application':mediaType}/${mediaType==='document'?'octet-stream':mediaType==='image'?'jpeg':mediaType==='video'?'mp4':'ogg'}`,filename:descriptor.filename,omitted:!media}:undefined,
+      providerPayload:p,
+    }:wire.event.startsWith('label.')?{id:typeof p.label_id==='string'?p.label_id.slice(0,64):'',at:wire.timestamp??p.timestamp??new Date().toISOString(),metadata:wire.event==='label.edit'?{...(typeof p.name==='string'?{name:p.name.slice(0,120)}:{}),...(typeof p.color==='number'?{color:p.color}:{}),...(typeof p.deleted==='boolean'?{deleted:p.deleted}:{}),...(typeof p.is_active==='boolean'?{active:p.is_active}:{})}:undefined,conversation:typeof p.chat_id==='string'?crmJid(p.chat_id):undefined,applied:typeof p.labeled==='boolean'?p.labeled:undefined}:wire.event==='chat_presence'?{externalConversationId:crmJid(p.chat_id),state:p.state==='composing'?'composing':'paused',recording:p.media==='audio'}:wire.event==='message.ack'?{...p,messageIds:Array.isArray(p.ids)?p.ids:[],messageId:Array.isArray(p.ids)?p.ids[0]:p.id,status:String(p.receipt_type??p.status??'').toLowerCase()}:p;
+    const fingerprint=createHash('sha256').update(rawBody).digest('hex');
+    const envelope={event,sessionId:account.externalId,timestamp:p.timestamp,data,providerEventType:wire.event,providerPayload:p};
     return {
       payload: envelope as unknown as Record<string, unknown>,
-      // Prefer the header, fall back to the signed body. Both are covered by the signature path:
-      // the body is signed, and a forged header cannot change the body the HMAC was computed over.
-      providerIdempotencyKey:
-        header(OPENWA_HEADERS.IDEMPOTENCY_KEY) ??
-        envelope.idempotencyKey ??
-        `${envelope.event}:${envelope.sessionId}:${envelope.timestamp}`,
-      providerDeliveryId: header(OPENWA_HEADERS.DELIVERY_ID) ?? envelope.deliveryId ?? null,
-      providerRetryCount: Number(header(OPENWA_HEADERS.RETRY_COUNT) ?? 0) || 0,
-      eventType: envelope.event,
-      consumed: isSubscribedEvent(envelope.event),
+      // Upstream has no signed delivery timestamp or idempotency header. Deduplicate signed bytes;
+      // message timestamps can legitimately be historical and must not be invented as delivery times.
+      providerIdempotencyKey:`gowa-${fingerprint}`,
+      providerDeliveryId:null,providerRetryCount:0,eventType:event,
+      consumed:event==='channel.label'||isSubscribedEvent(event)||['message.reaction','message.edited','message.deleted','chat_presence'].includes(event),
     };
   }
 
@@ -555,7 +564,10 @@ export class WhatsAppChannelAdapter implements ChannelAdapter, OnModuleInit {
       : [];
 
     return {
+      presentation:this.presentation((data as unknown as {providerPayload?:Record<string,unknown>}).providerPayload??{}),
       externalId: data.id,
+      externalIdAliases:this.messageAliases(data.id,data.chatId),
+      quotedExternalIdAliases:data.quotedMessage?.id?this.messageAliases(data.quotedMessage.id,data.chatId):undefined,
       channelAccountId: account.id,
       externalConversationId: data.chatId,
       externalGroupId: isGroup ? data.chatId : null,
@@ -565,8 +577,8 @@ export class WhatsAppChannelAdapter implements ChannelAdapter, OnModuleInit {
       // `senderPhone` is only populated by the gateway for privacy-id senders; fall back to parsing
       // the JID, which is the ordinary case.
       senderPhone: extractPhone(data.senderPhone) ?? extractPhone(senderExternalId),
-      body: sanitizeText(data.body, MAX_BODY_LENGTH),
-      messageType: contentTypeToInbound(contentType),
+      body: typeof data.body==='string'?data.body.replace(/[\u0000-\u0008\u000b-\u001f\u007f-\u009f]/g,'').trim().slice(0,MAX_BODY_LENGTH)||null:null,
+      messageType:((data as unknown as {providerPayload?:{poll?:{type?:string}}}).providerPayload?.poll&&((data as unknown as {providerPayload:{poll:{type?:string}}}).providerPayload.poll.type!=='creation'))?'system':contentTypeToInbound(contentType),
       sentAt: toDate(data.timestamp),
       fromMe: Boolean(data.fromMe),
       quotedExternalId: data.quotedMessage?.id ?? null,
@@ -593,6 +605,19 @@ export class WhatsAppChannelAdapter implements ChannelAdapter, OnModuleInit {
    * Returns null for a different event type, a missing message id, or a status this adapter cannot
    * map — an unmappable receipt must not move the delivery state at all.
    */
+  private messageAliases(id:string,chat:string){const raw=providerMessageId(id)??id;return [...new Set([raw,...[crmJid(chat),providerJid(chat)].flatMap(jid=>[`true_${jid}_${raw}`,`false_${jid}_${raw}`])])];}
+  normalizeMessageMutation(event:string,data:Record<string,unknown>):import('../../messaging/message-presentation.service').MessageMutation|null {
+    const provider=(data.providerPayload??{}) as Record<string,unknown>;const poll=provider.poll as Record<string,unknown>|undefined;
+    if(poll&&typeof poll.poll_id==='string'&&poll.type!=='creation')return {kind:'poll',externalId:poll.poll_id,conversation:crmJid(provider.chat_id),at:String(provider.timestamp??new Date().toISOString()),actor:provider.is_from_me?'self':crmJid(provider.from),poll};
+    const kinds:Record<string,'edit'|'revoke'|'delete'|'reaction'>={'message.edited':'edit','message.revoked':'revoke','message.deleted':'delete','message.reaction':'reaction'};const kind=kinds[event];if(!kind)return null;
+    const id=data.original_message_id??data.revoked_message_id??data.deleted_message_id??data.reacted_message_id;if(typeof id!=='string')return null;
+    return {externalId:id,conversation:typeof data.chat_id==='string'?crmJid(data.chat_id):undefined,at:String(data.timestamp??new Date().toISOString()),kind,body:typeof data.body==='string'?data.body:undefined,actor:data.is_from_me?'self':crmJid(data.from),emoji:typeof data.reaction==='string'?data.reaction:undefined};
+  }
+  private presentation(p:Record<string,unknown>){
+    const out:Record<string,unknown>={};for(const key of ['poll','location','live_location','contact','contacts_array','template'])if(p[key]&&Buffer.byteLength(JSON.stringify(p[key]))<=32000)out[key]=p[key];
+    if(p.is_view_once||p.view_once)out.viewOnce=true;if(p.is_forwarded)out.forwarded=true;return out;
+  }
+
   normalizeDeliveryReceipt(
     eventType: string,
     data: Record<string, unknown>,
@@ -605,6 +630,12 @@ export class WhatsAppChannelAdapter implements ChannelAdapter, OnModuleInit {
 
     if (typeof externalMessageId !== 'string' || !externalMessageId || !status) return null;
     return { externalMessageId, status };
+  }
+  normalizeDeliveryReceipts(eventType:string,data:Record<string,unknown>):NormalizedDeliveryReceipt[]{
+    if(Array.isArray(data.messageIds))return data.messageIds.slice(0,1000).flatMap(id=>{
+      const receipt=this.normalizeDeliveryReceipt(eventType,{...data,messageId:id});return receipt?[receipt]:[];
+    });
+    const receipt=this.normalizeDeliveryReceipt(eventType,data);return receipt?[receipt]:[];
   }
 
   /**
@@ -761,14 +792,8 @@ export class WhatsAppChannelAdapter implements ChannelAdapter, OnModuleInit {
   }
 
   /** Reads only `sessionId` from an UNVERIFIED body, to find which account's secret to check. */
-  identifyWebhookAccount(rawBody: Buffer): string | null {
-    try {
-      const parsed = JSON.parse(rawBody.toString('utf8')) as { sessionId?: unknown };
-      return typeof parsed?.sessionId === 'string' ? parsed.sessionId.slice(0, 128) : null;
-    } catch {
-      return null;
-    }
-  }
+  identifyWebhookAccount(rawBody: Buffer): string | null {try{const payload=JSON.parse(rawBody.toString('utf8')) as {session_id?:unknown};return typeof payload.session_id==='string'?payload.session_id:null;}catch{return null;}}
+
 
   private async loadAccount(channelAccountId: string): Promise<ChannelAccount> {
     const account = await this.accounts.findOne({ where: { id: channelAccountId } });

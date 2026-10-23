@@ -51,3 +51,9 @@ Target WCAG AA for normal text contrast; check final rendered combinations befor
 `pnpm design:check` verifies 20 core text/background pairs against a minimum of 4.5:1. It caught and corrected the initial dark primary fill and light secondary text combinations. It does not inspect composited colors, browser rendering, every status badge or all accessibility criteria.
 
 Review at 375, 768, 1280 and 1440px in both themes: main content must not overflow horizontally; wide tables may scroll within their wrapper. No essential operation is hidden solely for mobile. Validation evidence and unavailable review surfaces are recorded in the phase plan.
+
+## Authorized WhatsApp window treatment
+
+The owner's later request authorizes a WhatsApp-like green/neutral treatment inside the WhatsApp frame. Scoped --wa-* semantic tokens in theme.css and whatsapp.css implement its light/dark surfaces, rail, account header, chat list, message wallpaper/bubbles, composer, dialogs and mobile layouts. The outer CRM shell and other pages keep Indigo Workspace tokens. This supersedes the earlier no-second-theme statement only within this frame.
+
+Use the familiar interaction hierarchy: stable left directory, scrollable conversation, compact header/composer, optional customer context; bottom feature navigation on narrow screens. Native dialogs provide Escape/focus containment. Feature results, schedules, status and channel views use readable cards/tables and real state. No dummy conversations, fabricated delivery indicators, fake channel subscriptions or synthetic QR images are shown. This is an independently implemented familiar interface, not a claim of pixel-identical or browser-verified reproduction. Rendered responsive/dark-mode acceptance is deferred in this phase.

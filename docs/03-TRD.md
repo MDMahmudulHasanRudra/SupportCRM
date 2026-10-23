@@ -9,8 +9,8 @@
 | Persistence | PostgreSQL, pgvector where available, TypeORM entities and explicit migrations; synchronization disabled |
 | Coordination | Redis, BullMQ queues, distributed locks/rate counters, Socket.IO Redis adapter |
 | Workers | Same module graph, distinct worker entrypoint and run mode |
-| WhatsApp | OpenWA integration behind `modules/channel/whatsapp`; web client calls only Support CRM |
-| Files | Existing storage service and knowledge-document parsing/indexing pipeline; message-media download remains incomplete |
+| WhatsApp | Go WhatsApp v9.6.0 integration behind `modules/channel/whatsapp`; web client calls only Support CRM |
+| Files | Existing storage service and knowledge-document parsing/indexing pipeline; protected WhatsApp media storage/streaming is implemented; runtime acceptance is deferred |
 | Deployment | Existing Docker Compose, API and worker processes, web/nginx proxy, health checks and volumes |
 | Documentation tooling | Python 3.9+ for offline source-reference and theme-contrast checks; not part of the application runtime |
 | Browser acceptance | Playwright/Chromium against a localhost deployment; session cookies remain in memory, no storage-state or credential artifacts |
@@ -26,7 +26,7 @@ Exact versions and scripts are defined in the root and application `package.json
 5. Use additive explicit migrations. Preserve original data and history. Verify rollback in an isolated database where practical.
 6. Heavy sync/import/broadcast/indexing operations become jobs. Their progress and failures must remain inspectable.
 7. Every new page uses the shared theme and design system. Native form controls remain correctly labelled; modal interactions preserve keyboard access.
-8. Respect existing uncommitted work. Do not reset the database, replace the gateway or rewrite unrelated modules during presentation work.
+8. Respect existing uncommitted work. Do not reset the database or rewrite unrelated modules. The owner-authorized Go WhatsApp replacement is a distinct implementation phase.
 
 ## Build and runtime constraints
 
@@ -38,4 +38,16 @@ The schedule lifecycle extension also requires `1788400001000-ShiftLifecycle`. T
 
 ## Reliability and review
 
+Directory and private-inbox extensions require the additive customer-directory (`1788400002000`) and inbox-reading (`1788400003000`) migrations. Customer CSV requests are synchronous and bounded to 512 KiB/250 rows with transactional preview revalidation; larger import jobs are not exposed. Inbox read receipts remain channel-neutral, per user and exact message ID, independent of native-channel read receipts and support lifecycle.
+
 Reused mechanisms include provider-event/message uniqueness, outbound idempotency, retries, job history, reconnect health, audit and encrypted credentials. Realtime/polling behavior is defined by the existing `usePairing` hook, not an assumed SSE implementation. Verification gates and infrastructure isolation are defined in `10-TESTING-DEPLOYMENT.md`.
+
+## Go WhatsApp implementation
+
+The only active transport is GoWaClient within the WhatsApp boundary. Native operations are generated from the checked-in v9.6.0 OpenAPI snapshot using YAML; AJV validates bounded typed inputs and permissions are checked on the server. Native account operations use CRM-bound device IDs and per-account webhooks. OpenWA wire-client and vendored runtime source are removed; compatibility-named normalization types/mappers remain for stored addresses and historical fixtures, not an alternate gateway.
+
+Environment: GOWA_BASE_URL, environment-only GOWA_BASIC_AUTH, GOWA_MANAGED_AUTOMATION_DISABLED and optional exact GOWA_LINK_PREVIEW_HOSTS. Provider autonomous replies, public UI/MCP and direct Chatwoot sending remain disabled in managed configuration; existing CRM automation and the managed bridges provide those entry points. Link sharing defaults to text; native preview retrieval requires a trusted host in the deployment allowlist. Uploads are actor/account-bound and capped at 25 MiB, with actual provider limits still authoritative. Media streams use private authenticated endpoints, bounded downloads, safe MIME selection and no executable inline content.
+
+Migrations 1788400004000 through 1788400008000 are required before updated API/worker execution. They have not been applied to the owner's running database in this phase. Native gateway execution and functional tests are deferred by request.
+
+CRM_PUBLIC_URL identifies the external browser/callback URL independently of internal API_BASE_URL. A new Chatwoot configuration stays disabled until explicitly enabled.

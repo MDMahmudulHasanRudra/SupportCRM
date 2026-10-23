@@ -96,7 +96,7 @@ async function seed(): Promise<void> {
     // Future channels are seeded disabled: they are the registry the UI reads, and shipping them
     // as rows now means adding Messenger later is an adapter plus a flag, not a migration.
     const channels: Array<{ key: ChannelKey; name: string; isEnabled: boolean; adapterKey: string | null }> = [
-      { key: ChannelKey.WHATSAPP, name: 'WhatsApp', isEnabled: true, adapterKey: 'openwa' },
+      { key: ChannelKey.WHATSAPP, name: 'WhatsApp', isEnabled: true, adapterKey: 'gowa' },
       { key: ChannelKey.MESSENGER, name: 'Messenger', isEnabled: false, adapterKey: null },
       { key: ChannelKey.FACEBOOK_PAGE, name: 'Facebook Page', isEnabled: false, adapterKey: null },
       { key: ChannelKey.INSTAGRAM, name: 'Instagram', isEnabled: false, adapterKey: null },

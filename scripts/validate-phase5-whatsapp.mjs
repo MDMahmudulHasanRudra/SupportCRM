@@ -1,4 +1,6 @@
 #!/usr/bin/env node
+// Historical OpenWA validation flow. Never run against Go WhatsApp.
+throw new Error('Retired OpenWA validation script. See docs/GOWA-MIGRATION.md for the active provider and deferred acceptance gates.');
 /**
  * Phase 5L — real-WhatsApp validation of the Message Decision Engine.
  *

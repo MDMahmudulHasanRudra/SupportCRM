@@ -4,6 +4,7 @@ import { Brackets, DataSource, IsNull, LessThan, Repository } from 'typeorm';
 import { AppLogger } from '../../common/logging/app-logger';
 import { MetricsService } from '../../common/metrics/metrics.service';
 import { Message } from '../messaging/entities/message.entity';
+import { EMPTY_INBOX, InboxService } from './inbox.service';
 import { RealtimeGateway } from '../realtime/realtime.gateway';
 import {
   ConversationControlState,
@@ -64,6 +65,7 @@ export class ConversationService {
     private readonly dataSource: DataSource,
     private readonly realtime: RealtimeGateway,
     private readonly metrics: MetricsService,
+    private readonly inbox: InboxService,
   ) {}
 
   async findOne(id: string): Promise<Conversation> {
@@ -99,7 +101,7 @@ export class ConversationService {
     search?: string;
     limit?: number;
     offset?: number;
-  }) {
+  }, userId?:string) {
     const limit = Math.min(options.limit ?? 25, 100);
     const offset = Math.max(options.offset ?? 0, 0);
 
@@ -147,9 +149,10 @@ export class ConversationService {
 
     const [items, total] = await qb.skip(offset).take(limit).getManyAndCount();
     const previews = await this.lastMessagePreviews(items.map((c) => c.id));
+    const inbox = userId ? await this.inbox.metadata(items.map(c=>c.id),userId) : new Map();
 
     return {
-      items: items.map((c) => ({ ...this.withSpecState(c), ...(previews.get(c.id) ?? EMPTY_PREVIEW) })),
+      items: items.map((c) => ({ ...this.withSpecState(c), ...(previews.get(c.id) ?? EMPTY_PREVIEW), ...(inbox.get(c.id) ?? EMPTY_INBOX) })),
       total,
       limit,
       offset,

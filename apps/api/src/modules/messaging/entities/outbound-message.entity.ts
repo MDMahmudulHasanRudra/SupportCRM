@@ -36,6 +36,13 @@ export enum OutboundSource {
 @Index(['status', 'scheduledAt'])
 @Index(['channelAccountId', 'createdAt'])
 export class OutboundMessage {
+  @Column({type:'jsonb',nullable:true})
+  channelCommand!:import('../../channel/channel-adapter.interface').ChannelCommand|null;
+  @Column({type:'timestamptz',nullable:true})
+  scheduledFor!:Date|null;
+  @Column({type:'uuid',nullable:true})
+  managedScheduleId!: string|null;
+
   @PrimaryGeneratedColumn('uuid')
   id!: string;
 

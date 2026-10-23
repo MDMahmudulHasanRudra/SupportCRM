@@ -1,13 +1,17 @@
-import { useCallback, useEffect, useState, type FormEvent } from 'react';
+import { useCallback, useEffect, useRef, useState, type FormEvent } from 'react';
 import { Link } from 'react-router-dom';
 import {
   customers as customersApi,
   type Customer,
+  type CustomerStatusValue,
   type CustomerIdentity,
   type CustomerNote,
   type CustomerWithTags,
 } from '../api/client';
 import { useAuth } from '../auth-context';
+import { CustomerImportDialog } from '../components/customer-import';
+import { CustomerFields, customerBusinessFields } from '../components/customer-fields';
+import { Dialog } from './workspace/shared';
 import { IconAlertCircle, IconUserCircle, IconUsers } from '../components/icons';
 import {
   Badge,
@@ -39,6 +43,14 @@ export function CustomersPage() {
   const [items, setItems] = useState<Customer[] | null>(null);
   const [listError, setListError] = useState<string | null>(null);
   const [search, setSearch] = useState('');
+  const [status, setStatus] = useState(''); const [country, setCountry] = useState(''); const [owner, setOwner] = useState('');
+  const [offset, setOffset] = useState(0); const [total, setTotal] = useState(0); const [listBusy, setListBusy] = useState(false);
+  const [owners, setOwners] = useState<Array<{id:string;name:string}>>([]);
+  const [importing, setImporting] = useState(false);
+  const listRevision = useRef(0); const detailRevision = useRef(0); const selectedRef = useRef<string | null>(null);
+  const filters = { search: search || undefined, status: (status || undefined) as CustomerStatusValue | undefined, country: country.length === 2 ? country : undefined, accountOwnerId: owner && owner !== 'unassigned' ? owner : undefined, unassigned: owner === 'unassigned' ? 'true' : undefined };
+  const canImport = canManage && can('customers.read') && can('customers.import');
+  useEffect(() => { let active=true; if(canManage) void customersApi.owners().then(p=>{if(active) setOwners(p.items);}).catch(()=>undefined); return()=>{active=false;}; },[canManage]);
 
   const [selectedId, setSelectedId] = useState<string | null>(null);
   const [detail, setDetail] = useState<CustomerWithTags | null>(null);
@@ -51,47 +63,55 @@ export function CustomersPage() {
   const [savingNote, setSavingNote] = useState(false);
 
   const loadList = useCallback(async () => {
+    const revision=++listRevision.current; setListBusy(true);
     try {
-      const { items: rows } = await customersApi.list({ search: search || undefined, limit: 50 });
-      setItems(rows);
+      const page = await customersApi.list({ search: search || undefined, status: (status || undefined) as CustomerStatusValue | undefined, country: country.length === 2 ? country : undefined, accountOwnerId: owner && owner !== 'unassigned' ? owner : undefined, unassigned: owner === 'unassigned' ? 'true' : undefined, limit: 50, offset });
+      if(revision!==listRevision.current) return;
+      setItems(page.items); setTotal(page.total);
       setListError(null);
     } catch (failure) {
-      setListError(errorMessage(failure, 'Customers could not be loaded.'));
-    }
-  }, [search]);
+      if(revision===listRevision.current) setListError(errorMessage(failure, 'Customers could not be loaded.'));
+    } finally { if(revision===listRevision.current) setListBusy(false); }
+  }, [search,status,country,owner,offset]);
 
   useEffect(() => {
+    const counter = listRevision;
     const timer = window.setTimeout(() => void loadList(), 250);
-    return () => window.clearTimeout(timer);
+    return () => { window.clearTimeout(timer); counter.current++; };
   }, [loadList]);
 
   const loadDetail = useCallback(async (id: string) => {
+    const revision=++detailRevision.current;
     try {
       const [customer, identityPage, notePage] = await Promise.all([
         customersApi.get(id),
         customersApi.identities(id),
         customersApi.notes(id),
       ]);
+      if(revision!==detailRevision.current || selectedRef.current!==id) return;
       setDetail(customer);
       setIdentities(identityPage.items);
       setNotes(notePage.items);
       setDetailError(null);
     } catch (failure) {
-      setDetailError(errorMessage(failure, 'This customer could not be loaded.'));
+      if(revision===detailRevision.current && selectedRef.current===id) setDetailError(errorMessage(failure, 'This customer could not be loaded.'));
     }
   }, []);
 
   useEffect(() => {
+    const counter = detailRevision;
     if (selectedId) void loadDetail(selectedId);
+    return()=>{counter.current++;};
   }, [selectedId, loadDetail]);
+
+  function selectCustomer(id: string) { if(selectedRef.current===id) return; selectedRef.current=id; detailRevision.current++; setDetail(null); setIdentities(null); setNotes(null); setDetailError(null); setNoteDraft(''); setSelectedId(id); }
 
   async function submitNote() {
     if (!selectedId || !noteDraft.trim()) return;
-    setSavingNote(true);
+    const customerId=selectedId; setSavingNote(true);
     try {
-      await customersApi.addNote(selectedId, noteDraft.trim());
-      setNoteDraft('');
-      await loadDetail(selectedId);
+      await customersApi.addNote(customerId, noteDraft.trim());
+      if(selectedRef.current===customerId) { setNoteDraft(''); await loadDetail(customerId); }
     } catch (failure) {
       toast.error(errorMessage(failure, 'The note could not be saved.'));
     } finally {
@@ -104,19 +124,19 @@ export function CustomersPage() {
       <PageHeader
         title="Customers"
         description="The business relationships behind the conversations — never just a phone number."
-        actions={
-          canManage && (
-            <button type="button" className="primary" onClick={() => setShowCreate(true)}>
-              + New customer
-            </button>
-          )
-        }
+        actions={<>{can('customers.read') && can('customers.export') && <a className="button-link" href={customersApi.exportUrl(filters)} target="_blank" rel="noreferrer">Export matching CSV</a>}{canImport && <button onClick={()=>setImporting(true)}>Import customers</button>}{canManage && <button type="button" className="primary" onClick={()=>setShowCreate(true)}>+ New customer</button>}</>}
       />
 
+      <div className="customer-directory-filters">
+        <label>Status<select value={status} onChange={e=>{setStatus(e.target.value);setOffset(0);}}><option value="">All statuses</option><option>ACTIVE</option><option>PROSPECT</option><option>INACTIVE</option></select></label>
+        <label>Country (ISO)<input value={country} maxLength={2} placeholder="All" onChange={e=>{setCountry(e.target.value.toUpperCase());setOffset(0);}} /></label>
+        {canManage && <label>Account owner<select value={owner} onChange={e=>{setOwner(e.target.value);setOffset(0);}}><option value="">All owners</option><option value="unassigned">Unassigned</option>{owners.map(o=><option value={o.id} key={o.id}>{o.name}</option>)}</select></label>}
+        <span className="small muted" aria-live="polite">{listBusy ? 'Loading customers...' : `${total} matching customers`}</span>
+      </div>
       <div className="customers-shell">
         <div className="inbox-pane" style={{ height: 'calc(100vh - 160px)', minHeight: 420 }}>
           <div className="inbox-search">
-            <input placeholder="Search name, phone, email…" value={search} onChange={(event) => setSearch(event.target.value)} />
+            <input aria-label="Search customers" placeholder="Search code, name, phone, email…" value={search} onChange={(event) =>  { setSearch(event.target.value); setOffset(0); }} />
           </div>
           <div className="inbox-list">
             {listError && (
@@ -137,13 +157,14 @@ export function CustomersPage() {
                 key={customer.id}
                 type="button"
                 className={customer.id === selectedId ? 'customer-row active' : 'customer-row'}
-                onClick={() => setSelectedId(customer.id)}
+                onClick={() => selectCustomer(customer.id)}
               >
-                <div className="customer-row-name">{customer.displayName}</div>
+                <div className="customer-row-name">{customer.displayName}</div><div className="small muted">{customer.code} / {customer.serviceName || humanise(customer.status)}</div>
                 <div className="customer-row-meta">{customer.primaryPhone ?? customer.email ?? customer.company ?? '—'}</div>
               </button>
             ))}
           </div>
+          <div className="customer-pagination"><span className="small muted">{items?.length ? offset+1 : 0}-{offset+(items?.length || 0)} of {total}</span><button disabled={listBusy || offset===0} onClick={()=>setOffset(n=>Math.max(0,n-50))}>Previous</button><button disabled={listBusy || offset+50>=total} onClick={()=>setOffset(n=>n+50)}>Next</button></div>
         </div>
 
         <div className="stack">
@@ -171,6 +192,7 @@ export function CustomersPage() {
                 title={detail.displayName}
                   actions={<><Link to={`/customers/${detail.id}`} className="small">Client 360° ↗</Link><Badge tone={detail.status === 'ACTIVE' ? 'ok' : 'neutral'}>{humanise(detail.status)}</Badge></>}
               >
+                <dl className="client-facts"><dt>Client code</dt><dd>{detail.code}</dd><dt>Country</dt><dd>{detail.country || 'Not set'}</dd><dt>Service</dt><dd>{detail.serviceName || 'Not set'}</dd><dt>Account owner</dt><dd>{detail.accountOwner?.name || 'Unassigned'}{detail.accountOwner?.isActive === false && ' (inactive)'}</dd></dl>
                 <div className="form-grid">
                   <div>
                     <div className="muted small">Phone</div>
@@ -264,13 +286,14 @@ export function CustomersPage() {
         </div>
       </div>
 
+      {importing && <CustomerImportDialog onClose={()=>setImporting(false)} onImported={()=>{setImporting(false);setOffset(0);void loadList();}} />}
       {showCreate && (
         <CreateCustomerDialog
           onClose={() => setShowCreate(false)}
           onCreated={(customer) => {
             setShowCreate(false);
             void loadList();
-            setSelectedId(customer.id);
+            selectCustomer(customer.id);
           }}
         />
       )}
@@ -288,6 +311,8 @@ function CreateCustomerDialog({ onClose, onCreated }: { onClose: () => void; onC
 
   async function submit(event: FormEvent) {
     event.preventDefault();
+    if(busy) return;
+    const form=new FormData(event.currentTarget as HTMLFormElement);
     setBusy(true);
     try {
       const customer = await customersApi.create({
@@ -295,6 +320,8 @@ function CreateCustomerDialog({ onClose, onCreated }: { onClose: () => void; onC
         primaryPhone: primaryPhone.trim() || undefined,
         email: email.trim() || undefined,
         company: company.trim() || undefined,
+        code: String(form.get('code') || '').trim() || undefined,
+        ...customerBusinessFields(form),
       });
       onCreated(customer);
     } catch (failure) {
@@ -304,26 +331,24 @@ function CreateCustomerDialog({ onClose, onCreated }: { onClose: () => void; onC
   }
 
   return (
-    <div className="backdrop" role="dialog" aria-modal="true" aria-label="New customer">
-      <form className="dialog" onSubmit={(event) => void submit(event)}>
-        <div className="dialog-head">
-          <h2>New customer</h2>
-        </div>
+    <Dialog title="New customer" onClose={()=>{if(!busy) onClose();}}>
+      <form className="workspace-form" onSubmit={(event) => void submit(event)}>
         <div className="dialog-body stack">
           <Field label="Name">
-            <input value={displayName} autoFocus required onChange={(event) => setDisplayName(event.target.value)} />
+            <input value={displayName} autoFocus required maxLength={190} onChange={(event) => setDisplayName(event.target.value)} />
           </Field>
           <Field label="Phone" hint="Optional. Digits only.">
-            <input value={primaryPhone} onChange={(event) => setPrimaryPhone(event.target.value)} />
+            <input value={primaryPhone} maxLength={32} onChange={(event) => setPrimaryPhone(event.target.value)} />
           </Field>
           <Field label="Email" hint="Optional.">
-            <input type="email" value={email} onChange={(event) => setEmail(event.target.value)} />
+            <input type="email" value={email} maxLength={255} onChange={(event) => setEmail(event.target.value)} />
           </Field>
           <Field label="Company" hint="Optional.">
-            <input value={company} onChange={(event) => setCompany(event.target.value)} />
+            <input value={company} maxLength={190} onChange={(event) => setCompany(event.target.value)} />
           </Field>
+          <CustomerFields code />
         </div>
-        <div className="dialog-foot">
+        <div className="dialog-actions">
           <button type="button" onClick={onClose} disabled={busy}>
             Cancel
           </button>
@@ -332,6 +357,6 @@ function CreateCustomerDialog({ onClose, onCreated }: { onClose: () => void; onC
           </button>
         </div>
       </form>
-    </div>
+    </Dialog>
   );
 }

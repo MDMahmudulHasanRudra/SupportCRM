@@ -10,6 +10,8 @@ import { IngestionModule } from '../ingestion/ingestion.module';
 import { QUEUES } from '../jobs/queues';
 import { RealtimeModule } from '../realtime/realtime.module';
 import { TeamModule } from '../team/team.module';
+import { ChannelLabelService } from './channel-label.service';
+import { MessagePresentationService } from './message-presentation.service';
 import { DeliveryService } from './delivery.service';
 import { InboundMessageService } from './inbound-message.service';
 import { InboundProcessor } from './inbound.processor';
@@ -50,9 +52,9 @@ const isWorker = process.env.RUN_MODE === 'worker';
   providers: [
     MessageService,
     InboundMessageService,
-    DeliveryService,
+    DeliveryService,MessagePresentationService,ChannelLabelService,
     ...(isWorker ? [InboundProcessor, OutboundProcessor] : []),
   ],
-  exports: [MessageService, InboundMessageService, DeliveryService, TypeOrmModule],
+  exports: [ChannelLabelService,MessagePresentationService,MessageService, InboundMessageService, DeliveryService, TypeOrmModule],
 })
 export class MessagingModule {}

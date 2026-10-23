@@ -161,7 +161,8 @@ export class ConversationResolverService {
       reopenedTo = ConversationStatus.OPEN;
     }
 
-    await this.conversations.update(conversation.id, patch);
+    await this.conversations.createQueryBuilder().update().set({...patch,lastMessageAt:()=>"GREATEST(\"lastMessageAt\", :activityAt)",...(options.inbound?{lastInboundAt:()=>"GREATEST(\"lastInboundAt\", :activityAt)"}:{lastOutboundAt:()=>"GREATEST(\"lastOutboundAt\", :activityAt)"})}).where('id=:id',{id:conversation.id}).setParameter('activityAt',options.at).execute();
+    this.realtime.emitConversationEvent(options.inbound?'conversation.message_received':'conversation.message_sent',{conversationId:conversation.id,channelAccountId:conversation.channelAccountId});
     await this.conversations.increment({ id: conversation.id }, 'messageCount', 1);
 
     return reopenedTo;

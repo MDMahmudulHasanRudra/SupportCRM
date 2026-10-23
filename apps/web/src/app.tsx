@@ -4,6 +4,8 @@ import { useAuth } from './auth-context';
 import { humanise, ToastProvider } from './components/ui';
 import { IconChevronDown, IconLogOut, IconMoon, IconSun } from './components/icons';
 import { WorkspaceFrame } from './components/workspace-shell';
+import { WhatsAppAlias } from './pages/whatsapp';
+const WhatsAppWorkspacePage = lazy(() => import('./pages/whatsapp').then(m=>({default:m.WhatsAppWorkspacePage})));
 const AIProvidersPage = lazy(() => import('./pages/ai/providers').then(module => ({ default: module.AIProvidersPage })));
 const AIVoicePage = lazy(() => import('./pages/ai/voice').then(module => ({ default: module.AIVoicePage })));
 const AutomationProfilesPage = lazy(() => import('./pages/automation/profiles').then(module => ({ default: module.AutomationProfilesPage })));
@@ -11,8 +13,6 @@ const AutomationRuleEditorPage = lazy(() => import('./pages/automation/rule-edit
 const AutomationRulesPage = lazy(() => import('./pages/automation/rules').then(module => ({ default: module.AutomationRulesPage })));
 const BulkActionsPage = lazy(() => import('./pages/automation/bulk').then(module => ({ default: module.BulkActionsPage })));
 const CandidatesPage = lazy(() => import('./pages/automation/candidates').then(module => ({ default: module.CandidatesPage })));
-const BroadcastsPage = lazy(() => import('./pages/broadcasts').then(module => ({ default: module.BroadcastsPage })));
-const ConversationsPage = lazy(() => import('./pages/conversations').then(module => ({ default: module.ConversationsPage })));
 const CopilotPage = lazy(() => import('./pages/copilot').then(module => ({ default: module.CopilotPage })));
 const CustomersPage = lazy(() => import('./pages/customers').then(module => ({ default: module.CustomersPage })));
 const DashboardPage = lazy(() => import('./pages/dashboard').then(module => ({ default: module.DashboardPage })));
@@ -20,13 +20,9 @@ const DecisionsPage = lazy(() => import('./pages/decisions').then(module => ({ d
 const EmergencyPage = lazy(() => import('./pages/emergency').then(module => ({ default: module.EmergencyPage })));
 const EscalationConfigPage = lazy(() => import('./pages/escalation-config').then(module => ({ default: module.EscalationConfigPage })));
 const EscalationsPage = lazy(() => import('./pages/escalations').then(module => ({ default: module.EscalationsPage })));
-const GroupsPage = lazy(() => import('./pages/groups').then(module => ({ default: module.GroupsPage })));
-const GroupOperationsPage = lazy(() => import('./pages/groups/operations').then(module => ({ default: module.GroupOperationsPage })));
-const GroupDetailPage = lazy(() => import('./pages/groups/detail').then(module => ({ default: module.GroupDetailPage })));
 const SupportMembersPage = lazy(() => import('./pages/support/members').then(module => ({ default: module.SupportMembersPage })));
 const SupportMemberDetailPage = lazy(() => import('./pages/support/member-detail').then(module => ({ default: module.SupportMemberDetailPage })));
 const SupportActivityPage = lazy(() => import('./pages/support/activity').then(module => ({ default: module.SupportActivityPage })));
-const OnboardingRulesPage = lazy(() => import('./pages/groups/onboarding').then(module => ({ default: module.OnboardingRulesPage })));
 const KnowledgeBrowserPage = lazy(() => import('./pages/knowledge/browser').then(module => ({ default: module.KnowledgeBrowserPage })));
 const KnowledgeCandidatesPage = lazy(() => import('./pages/knowledge/candidates').then(module => ({ default: module.KnowledgeCandidatesPage })));
 const KnowledgeEditorPage = lazy(() => import('./pages/knowledge/editor').then(module => ({ default: module.KnowledgeEditorPage })));
@@ -34,13 +30,10 @@ import { LoginPage } from './pages/login';
 const ReportsPage = lazy(() => import('./pages/reports').then(module => ({ default: module.ReportsPage })));
 const SettingsPage = lazy(() => import('./pages/settings').then(module => ({ default: module.SettingsPage })));
 const RateLimitsPage = lazy(() => import('./pages/settings/rate-limits').then(module => ({ default: module.RateLimitsPage })));
-const WhatsAppAccountPage = lazy(() => import('./pages/whatsapp-account').then(module => ({ default: module.WhatsAppAccountPage })));
-const WhatsAppAccountsPage = lazy(() => import('./pages/whatsapp-accounts').then(module => ({ default: module.WhatsAppAccountsPage })));
 import { OverviewPage } from './pages/workspace/overview';
 const BillingPage = lazy(() => import('./pages/workspace/billing').then(module => ({ default: module.BillingPage })));
 const TeamWorkspacePage = lazy(() => import('./pages/workspace/team').then(module => ({ default: module.TeamWorkspacePage })));
 const NotificationsPage = lazy(() => import('./pages/workspace/notifications').then(module => ({ default: module.NotificationsPage })));
-const SavedRepliesPage = lazy(() => import('./pages/workspace/replies').then(module => ({ default: module.SavedRepliesPage })));
 const ReleasesPage = lazy(() => import('./pages/workspace/releases').then(module => ({ default: module.ReleasesPage })));
 const JobsPage = lazy(() => import('./pages/workspace/jobs').then(module => ({ default: module.JobsPage })));
 const SupportQueuePage = lazy(() => import('./pages/workspace/queue').then(module => ({ default: module.SupportQueuePage })));
@@ -90,29 +83,30 @@ export function App() {
             <Suspense fallback={<div className="progress"><span className="spinner" /><span className="muted">Loading workspace?</span></div>}>
             <Routes>
               <Route path="/" element={<OverviewPage />} />
+              <Route path="/whatsapp/*" element={<Access permission="channels.read"><WhatsAppWorkspacePage /></Access>} />
               <Route path="/analytics" element={<Access permission="reports.view"><DashboardPage /></Access>} />
               <Route path="/support-queue" element={<Access permission="conversations.read"><SupportQueuePage /></Access>} />
               <Route path="/billing" element={<Access permission="billing.read"><BillingPage /></Access>} />
               <Route path="/team" element={<Access permission="team.manage"><TeamWorkspacePage /></Access>} />
-              <Route path="/saved-replies" element={<Access permission="messages.read"><SavedRepliesPage /></Access>} />
+              <Route path="/saved-replies" element={<Access permission="messages.read"><WhatsAppAlias section="replies" /></Access>} />
               <Route path="/jobs" element={<Access permission="jobs.read"><JobsPage /></Access>} />
               <Route path="/notifications" element={<NotificationsPage />} />
               <Route path="/changelog" element={<ReleasesPage />} />
               <Route path="/access" element={<Access permission="users.read"><AccessPage /></Access>} />
 
               {/* Conversations and customers */}
-              <Route path="/conversations" element={<ConversationsPage />} />
+              <Route path="/conversations" element={<WhatsAppAlias section="" />} />
               <Route path="/customers" element={<CustomersPage />} />
               <Route path="/customers/:id" element={<Access permission="customers.read"><CustomerProfilePage /></Access>} />
 
               {/* Channels and groups */}
-              <Route path="/channels/whatsapp" element={<WhatsAppAccountsPage />} />
-              <Route path="/channels/whatsapp/:accountId" element={<WhatsAppAccountPage />} />
-              <Route path="/channels/whatsapp/:accountId/groups" element={<GroupsPage />} />
-              <Route path="/groups" element={<GroupOperationsPage />} />
-              <Route path="/groups/onboarding" element={<OnboardingRulesPage />} />
+              <Route path="/channels/whatsapp" element={<WhatsAppAlias section="accounts" />} />
+              <Route path="/channels/whatsapp/:accountId" element={<WhatsAppAlias section="accounts/:accountId" />} />
+              <Route path="/channels/whatsapp/:accountId/groups" element={<WhatsAppAlias section="accounts/:accountId/groups" />} />
+              <Route path="/groups" element={<WhatsAppAlias section="groups" />} />
+              <Route path="/groups/onboarding" element={<WhatsAppAlias section="groups/onboarding" />} />
               {/* Last: `onboarding` would otherwise be captured as a group id. */}
-              <Route path="/groups/:id" element={<GroupDetailPage />} />
+              <Route path="/groups/:id" element={<WhatsAppAlias section="groups/:id" />} />
 
               {/* Support members: the team_member_identities rows, reported on. */}
               <Route path="/support-members" element={<SupportMembersPage />} />
@@ -139,7 +133,7 @@ export function App() {
               <Route path="/decisions" element={<DecisionsPage />} />
               <Route path="/escalations" element={<EscalationsPage />} />
               <Route path="/escalations/config" element={<EscalationConfigPage />} />
-              <Route path="/broadcasts" element={<BroadcastsPage />} />
+              <Route path="/broadcasts" element={<WhatsAppAlias section="broadcasts" />} />
               <Route path="/reports" element={<ReportsPage />} />
               <Route path="/copilot" element={<CopilotPage />} />
 

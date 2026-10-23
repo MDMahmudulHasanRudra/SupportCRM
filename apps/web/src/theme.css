@@ -95,3 +95,19 @@
   --shadow-lg: 0 24px 80px rgb(23 35 59 / 18%);
   color-scheme: light;
 }
+:root {
+  --wa-bg: light-dark(#f0f2f5,#111b21);
+  --wa-surface: light-dark(#ffffff,#111b21);
+  --wa-head: light-dark(#f0f2f5,#202c33);
+  --wa-paper: light-dark(#efeae2,#0b141a);
+  --wa-incoming: light-dark(#ffffff,#202c33);
+  --wa-outgoing: light-dark(#d9fdd3,#005c4b);
+  --wa-text: light-dark(#111b21,#e9edef);
+  --wa-muted: light-dark(#54656f,#8696a0);
+  --wa-border: light-dark(#e7ebee,#27343b);
+  --wa-accent: light-dark(#008069,#00a884);
+  --wa-primary: light-dark(#008069,#00a884);
+  --wa-on-primary: light-dark(#ffffff,#07271f);
+  --wa-selected: light-dark(#f0f2f5,#2a3942);
+  --wa-soft: light-dark(#e7fce3,#0b332b);
+}

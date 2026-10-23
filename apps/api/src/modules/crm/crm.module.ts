@@ -10,6 +10,10 @@ import { ConversationService } from './conversation.service';
 import { ConversationsController } from './conversations.controller';
 import { CrmMaintenanceProcessor } from './crm-maintenance.processor';
 import { CustomerService } from './customer.service';
+import { CustomerDirectoryController } from './customer-directory.controller';
+import { CustomerImportService } from './customer-import.service';
+import { InboxService } from './inbox.service';
+import { InboxController } from './inbox.controller';
 import { CustomersController } from './customers.controller';
 import { Conversation } from './entities/conversation.entity';
 import { ConversationParticipant } from './entities/conversation-participant.entity';
@@ -58,9 +62,11 @@ const isWorker = process.env.RUN_MODE === 'worker';
     TeamModule,
     forwardRef(() => ChannelModule),
   ],
-  controllers: [CustomersController, ConversationsController],
+  controllers: [CustomersController, CustomerDirectoryController, ConversationsController, InboxController],
   providers: [
     CustomerService,
+    CustomerImportService,
+    InboxService,
     ConversationService,
     ConversationResolverService,
     ...(isWorker ? [CrmMaintenanceProcessor] : []),

@@ -36,3 +36,9 @@ The wider feature inventory and its unfinished items are tracked in `FEATURE_AUD
 ## Success measures
 
 Measure after real usage: time to connect a number, connection failure rate, time to locate and assign work, human response intervals, failed sends/jobs and knowledge review throughput. No invented baseline, growth percentage or target completion claim is shown in the UI. The current visual release is accepted against `02-PRD.md`, `06-UI-UX-DESIGN.md` and `10-TESTING-DEPLOYMENT.md`.
+
+## Authorized WhatsApp replacement - 23 October 2026
+
+The owner explicitly replaces the legacy OpenWA gateway with Go WhatsApp, requests one WhatsApp navigation entry and a familiar list/thread/composer window, and defers Docker runs and functional tests. This replaces the earlier presentation-only scope for this phase. PROJECT_SPEC.md remains preserved; the owner-directed transport decision is recorded here and in GOWA-MIGRATION.md.
+
+Business scope includes account/QR/phone-code pairing, messaging/media/polls, contact/profile/privacy information, native chat and group operations, channel reading, controlled recurring schedules, optional Chatwoot integration and authenticated MCP tools. Existing customers, billing, assignments, message history, private inbox state and automation remain. Additional messaging platforms and project isolation are separate work. Feature coverage and native limitations have an explicit release-derived map in GOWA-FEATURE-MAP.md; source implementation is distinct from provider acceptance.

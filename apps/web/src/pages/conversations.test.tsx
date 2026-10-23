@@ -1,0 +1,50 @@
+import { fireEvent, render, screen, waitFor } from '@testing-library/react';
+import { MemoryRouter } from 'react-router-dom';
+import { beforeEach, expect, it, vi } from 'vitest';
+import { conversations, customers, decisions, groups, settings, whatsapp, type ConversationWithTags } from '../api/client';
+import { inbox } from '../api/inbox';
+import { ConversationsPage } from './conversations';
+const toast={success:vi.fn(),error:vi.fn()};
+vi.mock('../auth-context',()=>({useAuth:()=>({can:(p:string)=>['conversations.read','messages.read','groups.read','customers.read'].includes(p)})}));
+vi.mock('../api/realtime',()=>({onConversationEvent:()=>()=>undefined}));
+vi.mock('../components/ui',async()=>({...await vi.importActual('../components/ui'),useToast:()=>toast}));
+const row=(id:string,patch:Partial<ConversationWithTags>={})=>({id,subject:`Thread ${id}`,channelKey:'WHATSAPP',externalConversationId:id,channelAccountId:'account',kind:'DIRECT',status:'OPEN',controlState:'AUTOMATION_ACTIVE',tags:[],unreadCount:0,markedUnread:false,isArchived:false,isPinned:false,...patch}) as ConversationWithTags;
+let rows:ConversationWithTags[];
+beforeEach(()=>{
+  HTMLElement.prototype.scrollTo=vi.fn();
+  vi.restoreAllMocks();rows=[row('A',{unreadCount:2}),row('B',{isArchived:true})];
+  vi.spyOn(whatsapp,'overview').mockResolvedValue({items:[{id:'account',name:'Fixture',sessionName:'fixture',phoneNumber:null,displayName:null,state:'DISCONNECTED',connected:false,statusText:'Disconnected',isPrimary:false,ownerId:null,capabilities:{},lastError:null,lastHealthAt:null,createdAt:new Date().toISOString()}]} as unknown as Awaited<ReturnType<typeof whatsapp.overview>>);
+  vi.spyOn(groups,'directory').mockResolvedValue({items:[],total:0});
+  vi.spyOn(customers,'allIdentities').mockResolvedValue({items:[],total:0});
+  vi.spyOn(conversations,'list').mockImplementation(async()=>({items:rows,total:rows.length}));
+  vi.spyOn(conversations,'get').mockImplementation(async id=>rows.find(r=>r.id===id)!);
+  vi.spyOn(conversations,'messages').mockResolvedValue({items:[],hasMore:false,nextCursor:null,nextCursorId:null});
+  vi.spyOn(decisions,'list').mockResolvedValue({items:[],total:0});
+  vi.spyOn(settings,'featureFlags').mockResolvedValue({emergencyStops:{}} as Awaited<ReturnType<typeof settings.featureFlags>>);
+});
+it('organizes a private inbox as a reader, retains failed selections and never offers manager pin controls',async()=>{
+  const organize=vi.spyOn(inbox,'organize').mockRejectedValueOnce(new Error('Offline')).mockImplementation(async(ids,action)=>{
+    rows=rows.map(r=>ids.includes(r.id)?{...r,isArchived:action==='ARCHIVE'}:r);return {changed:ids.length,action};
+  });
+  render(<MemoryRouter><ConversationsPage/></MemoryRouter>);
+  fireEvent.click(await screen.findByRole('checkbox',{name:'Select Thread A'}));
+  expect(screen.queryByRole('button',{name:'Pin'})).not.toBeInTheDocument();
+  fireEvent.click(screen.getByRole('button',{name:'Archive'}));
+  await waitFor(()=>expect(toast.error).toHaveBeenCalled());
+  expect(screen.getByRole('checkbox',{name:'Select Thread A'})).toBeChecked();
+  fireEvent.click(screen.getByRole('button',{name:'Archive'}));
+  await waitFor(()=>expect(screen.queryByRole('checkbox',{name:'Select Thread A'})).not.toBeInTheDocument());
+  expect(organize).toHaveBeenLastCalledWith(['A'],'ARCHIVE');
+  fireEvent.change(screen.getByRole('combobox',{name:'Inbox view'}),{target:{value:'archived'}});
+  await screen.findByRole('checkbox',{name:'Select Thread A'});expect(screen.getByRole('checkbox',{name:'Select Thread B'})).toBeInTheDocument();
+});
+it('preserves a zero-count manual unread flag and closes the thread so automatic reads cannot immediately clear it',async()=>{
+  vi.spyOn(inbox,'organize').mockImplementation(async(ids,action)=>{rows=rows.map(r=>ids.includes(r.id)?{...r,markedUnread:true,unreadCount:0}:r);return {changed:ids.length,action};});
+  render(<MemoryRouter><ConversationsPage/></MemoryRouter>);
+  fireEvent.click(await screen.findByRole('button',{name:/Thread A/}));
+  fireEvent.click(await screen.findByRole('button',{name:'Mark unread'}));
+  await screen.findByText('Select a contact or group');
+  fireEvent.change(screen.getByRole('combobox',{name:'Inbox view'}),{target:{value:'unread'}});
+  await screen.findByText('Unread',{selector:'.badge'});
+  expect(screen.queryByText('1 unread')).not.toBeInTheDocument();
+});

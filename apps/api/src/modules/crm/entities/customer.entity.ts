@@ -3,11 +3,14 @@ import {
   CreateDateColumn,
   Entity,
   Index,
+  JoinColumn,
+  ManyToOne,
   OneToMany,
   PrimaryGeneratedColumn,
   UpdateDateColumn,
 } from 'typeorm';
 import { CustomerIdentity } from './customer-identity.entity';
+import { User } from '../../auth/entities/user.entity';
 
 export enum CustomerStatus {
   ACTIVE = 'ACTIVE',
@@ -47,6 +50,23 @@ export enum CustomerSource {
 export class Customer {
   @PrimaryGeneratedColumn('uuid')
   id!: string;
+
+  @Index({ unique: true })
+  @Column({ type: 'varchar', length: 40, default: () => "('CL-' || nextval('customer_code_seq')::text)" })
+  code!: string;
+
+  @Column({ type: 'varchar', length: 2, nullable: true })
+  country!: string | null;
+
+  @Column({ type: 'varchar', length: 160, nullable: true })
+  serviceName!: string | null;
+
+  @Column({ type: 'uuid', nullable: true })
+  accountOwnerId!: string | null;
+
+  @ManyToOne(() => User, { nullable: true, onDelete: 'SET NULL' })
+  @JoinColumn({ name: 'accountOwnerId' })
+  accountOwner?: Pick<User, 'id' | 'name' | 'username' | 'isActive'> | null;
 
   @Column({ type: 'varchar', length: 190 })
   displayName!: string;

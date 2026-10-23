@@ -40,6 +40,9 @@ import { MessageAttachment } from './message-attachment.entity';
 @Index(['conversationId', 'sentAt'])
 @Index(['channelAccountId', 'sentAt'])
 export class Message {
+  @Column({type:'jsonb',default:()=>"'{}'::jsonb"})
+  presentation!: Record<string,unknown>;
+
   @PrimaryGeneratedColumn('uuid')
   id!: string;
 

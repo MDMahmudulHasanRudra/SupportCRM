@@ -1,7 +1,10 @@
 import { useCallback, useEffect, useMemo, useRef, useState, type FormEvent } from 'react';
 import { Link, useSearchParams } from 'react-router-dom';
 import { workspace, type SavedReply } from '../api/workspace';
-import { MessageText } from '../components/message-text';
+import { WhatsAppChatTool,WhatsAppComposerExtras,WhatsAppMessageContent } from '../components/whatsapp-chat';
+import { WhatsAppIcon } from '../components/whatsapp-icons';
+import { inbox, type InboxAction } from '../api/inbox';
+import { useVisibleMessages } from '../components/use-visible-messages';
 import {
   conversations as conversationsApi,
   customers as customersApi,
@@ -21,7 +24,7 @@ import {
   type WhatsAppAccount,
   type WhatsAppGroup,
 } from '../api/client';
-import { onConversationEvent } from '../api/realtime';
+import { onConversationEvent,onWhatsAppPresence } from '../api/realtime';
 import { useAuth } from '../auth-context';
 import { AutomationStack, type AutomationLayers } from '../components/automation-stack';
 import { buildDirectory, type Destination } from './conversation-directory';
@@ -93,7 +96,7 @@ interface PendingSend {
  * exists. Nothing is invented locally to look responsive — an operator must never see a message as
  * sent that WhatsApp never accepted.
  */
-export function ConversationsPage() {
+export function ConversationsPage({embedded=false,externalAccount}:{embedded?:boolean;externalAccount?:string}={}) {
   const { can } = useAuth();
   const [searchParams] = useSearchParams();
   const requestedConversation = searchParams.get('conversation');
@@ -104,10 +107,14 @@ export function ConversationsPage() {
   const canSend = can('messages.send');
   const canReadGroups = can('groups.read');
   const canReadCustomers = can('customers.read');
+  const canReadMessages = can('messages.read');
 
   // --- directory -----------------------------------------------------------------------------
   const [accounts, setAccounts] = useState<WhatsAppAccount[] | null>(null);
-  const [accountFilter, setAccountFilter] = useState('');
+  const [accountFilter, setAccountFilter] = useState(externalAccount??'');
+  const [showContext,setShowContext]=useState(false);
+  const [showSearch,setShowSearch]=useState(false);
+  
   const [tab, setTab] = useState<'all' | 'users' | 'groups'>('all');
   const [search, setSearch] = useState('');
 
@@ -116,9 +123,19 @@ export function ConversationsPage() {
   const [conversationRows, setConversationRows] = useState<Conversation[]>([]);
   const [listError, setListError] = useState<string | null>(null);
   const [listLoading, setListLoading] = useState(true);
+  const directoryEpoch = useRef(0);
+  const [inboxView,setInboxView] = useState<'active'|'unread'|'archived'>('active');
+  const [checked,setChecked] = useState<Set<string>>(new Set());
+  const [organizing,setOrganizing] = useState(false);
+  const organizeLock = useRef(false);
+  const readsInFlight = useRef(new Map<string,Promise<unknown>>());
+  const [unreadAnchor,setUnreadAnchor] = useState<string|null>(null);
+  const [readError,setReadError] = useState(false);
 
   // --- selection -----------------------------------------------------------------------------
   const [selectedKey, setSelectedKey] = useState<string | null>(null);
+  const [chatTool,setChatTool]=useState<{operation:string;message?:ConversationMessage}|null>(null);
+  useEffect(()=>{if(externalAccount!==undefined){setAccountFilter(externalAccount);setSelectedKey(null);setChatTool(null);}},[externalAccount]);
   const [selected, setSelected] = useState<ConversationWithTags | null>(null);
   const [thread, setThread] = useState<ConversationMessage[] | null>(null);
   const [threadError, setThreadError] = useState<string | null>(null);
@@ -185,6 +202,7 @@ export function ConversationsPage() {
   }, []);
 
   const loadDirectory = useCallback(async () => {
+    const epoch=++directoryEpoch.current;
     setListLoading(true);
     try {
       const accountId = accountFilter || undefined;
@@ -200,18 +218,24 @@ export function ConversationsPage() {
         conversationsApi.list({ search: term, channelAccountId: accountId, limit: 100 }),
       ]);
 
+      if(epoch!==directoryEpoch.current) return;
       setGroupRows(groupPage.items);
       setIdentityRows(identityPage.items);
       setConversationRows(conversationPage.items);
       setListError(null);
     } catch (failure) {
+      if(epoch!==directoryEpoch.current) return;
       setListError(errorMessage(failure, 'The inbox could not be loaded.'));
     } finally {
-      setListLoading(false);
+      if(epoch===directoryEpoch.current) setListLoading(false);
     }
   }, [accountFilter, search, canReadGroups, canReadCustomers]);
+  const reloadDirectory=useRef(loadDirectory);
+  reloadDirectory.current=loadDirectory;
 
   useEffect(() => {
+    ++directoryEpoch.current;
+    setChecked(new Set());
     const timer = window.setTimeout(() => void loadDirectory(), 250);
     return () => window.clearTimeout(timer);
   }, [loadDirectory]);
@@ -219,9 +243,13 @@ export function ConversationsPage() {
   useEffect(() => onConversationEvent(null, () => void loadDirectory()), [loadDirectory]);
 
   const destinations = useMemo(
-    () => buildDirectory(groupRows, identityRows, conversationRows, tab),
-    [groupRows, identityRows, conversationRows, tab],
+    () => buildDirectory(groupRows, identityRows, conversationRows),
+    [groupRows, identityRows, conversationRows],
   );
+  const visibleDestinations=destinations.filter(item=>
+    (tab==='all'||(tab==='users'?item.kind==='USER':item.kind==='GROUP')) &&
+    (inboxView==='archived'?Boolean(item.conversation?.isArchived):!item.conversation?.isArchived &&
+      (inboxView!=='unread'||Boolean(item.conversation?.unreadCount||item.conversation?.markedUnread))));
 
   const destination = useMemo(
     () => destinations.find((item) => item.key === selectedKey) ?? null,
@@ -297,6 +325,7 @@ export function ConversationsPage() {
 
         setSelected(conversation);
         const same = loadedConversation.current === conversation.id;
+        if(!same) {setUnreadAnchor(conversation.firstUnreadMessageId??null);setReadError(false);}
         loadedConversation.current = conversation.id;
         setThread(current => same && current ? [...new Map([...current, ...messagePage.items].map(m => [m.id, m])).values()].sort((a,b) => a.sentAt.localeCompare(b.sentAt) || a.id.localeCompare(b.id)) : [...messagePage.items].reverse());
         if (!same) { setOlderCursor(messagePage.nextCursor); setOlderCursorId(messagePage.nextCursorId); }
@@ -329,8 +358,12 @@ export function ConversationsPage() {
     setStops(flags?.emergencyStops ?? null);
   }, []);
 
+  const [presence,setPresence]=useState('');
+  useEffect(()=>{setPresence('');let expiry:ReturnType<typeof setTimeout>|undefined;const off=onWhatsAppPresence(event=>{if(event.channelAccountId!==sendingAccountId||event.externalConversationId!==destination?.externalId)return;if(expiry)clearTimeout(expiry);setPresence(event.state==='composing'?(event.recording?'recording audio...':'typing...'):'');expiry=setTimeout(()=>setPresence(''),10000);});return()=>{off();if(expiry)clearTimeout(expiry);};},[sendingAccountId,destination?.externalId]);
   const destinationKey = destination?.key;
   const conversationId = destination?.conversation?.id;
+  const activeReadConversation=useRef(conversationId);
+  activeReadConversation.current=conversationId;
 
   useEffect(() => {
     if (destination) {
@@ -339,6 +372,9 @@ export function ConversationsPage() {
         setOlderCursor(null); setOlderCursorId(null);
       }
       void loadThread(destination);
+    } else {
+      ++threadEpoch.current; loadedConversation.current=null;
+      setSelected(null);setThread(null);setUnreadAnchor(null);
     }
     // Keyed on the destination identity, not the object: the merge rebuilds it on every refetch.
     // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -353,6 +389,45 @@ export function ConversationsPage() {
   }, [conversationId, loadThread]);
 
   const scrollRef = useRef<HTMLDivElement>(null);
+  const recordRead=useCallback(async(ids:string[])=>{
+    if(!conversationId||organizeLock.current) return;
+    const previous=readsInFlight.current.get(conversationId);
+    const request=(async()=>{await previous?.catch(()=>undefined);return inbox.read(conversationId,ids);})();
+    readsInFlight.current.set(conversationId,request);
+    try {
+      const result=await request;
+      setSelected(current=>current?.id===conversationId?{...current,...result}:current);
+      setConversationRows(rows=>rows.map(row=>row.id===conversationId?{...row,...result}:row));
+      if(activeReadConversation.current===conversationId)setReadError(false);
+      void reloadDirectory.current();
+    } catch(failure) {if(activeReadConversation.current===conversationId)setReadError(true);throw failure;}
+    finally {if(readsInFlight.current.get(conversationId)===request)readsInFlight.current.delete(conversationId);}
+  },[conversationId]);
+  useVisibleMessages(scrollRef,thread,Boolean(destination&&selected&&canReadMessages&&!organizing),recordRead);
+
+  async function organize(action:InboxAction,ids:string[]) {
+    if(!ids.length||organizeLock.current) return;
+    organizeLock.current=true;setOrganizing(true);
+    try {
+      await Promise.all(ids.map(id=>readsInFlight.current.get(id)?.catch(()=>undefined)));
+      await inbox.organize(ids,action);
+      setChecked(new Set());
+      if(selected&&ids.includes(selected.id)&&action==='MARK_UNREAD') setSelectedKey(null);
+      const patch=action==='PIN'||action==='UNPIN'?{isPinned:action==='PIN'}:action==='MARK_UNREAD'?{markedUnread:true}:{isArchived:action==='ARCHIVE'};
+      setConversationRows(rows=>rows.map(row=>ids.includes(row.id)?{...row,...patch}:row));
+      setSelected(current=>current&&ids.includes(current.id)?{...current,...patch}:current);
+      toast.success(`${ids.length} conversation${ids.length===1?'':'s'} updated.`);
+      void reloadDirectory.current();
+    } catch(failure) {toast.error(errorMessage(failure,'Inbox could not be updated. Your selection is retained.'));}
+    finally {organizeLock.current=false;setOrganizing(false);}
+  }
+  async function markLoadedRead() {
+    const ids=(thread??[]).filter(m=>m.direction==='INBOUND'&&m.contentType!=='SYSTEM_EVENT').map(m=>m.id);
+    try {
+      if(!ids.length) await recordRead([]);
+      for(let offset=0;offset<ids.length;offset+=200) await recordRead(ids.slice(offset,offset+200));
+    } catch { /* The retained read-status notice provides retry. */ }
+  }
   useEffect(() => {
     if (skipScroll.current) { skipScroll.current = false; return; }
     scrollRef.current?.scrollTo({ top: scrollRef.current.scrollHeight });
@@ -464,8 +539,8 @@ export function ConversationsPage() {
   }
 
   return (
-    <>
-      <PageHeader
+    <section className={embedded?'wa-chat':'conversation-page'}>
+      {!embedded&&<PageHeader
         title="Conversations"
         description="Every WhatsApp contact and group Support CRM knows about."
         actions={
@@ -492,13 +567,14 @@ export function ConversationsPage() {
             )}
           </>
         }
-      />
+      />} 
 
-      <div className="inbox">
+      <div className={`inbox${embedded?' wa-inbox':''}${destination?' has-chat':''}${showContext?' show-context':''}`}>
         {/* --- directory ---------------------------------------------------------------------- */}
-        <div className="inbox-pane">
+        <div className="inbox-pane wa-chat-list">
+          {embedded&&<header className="wa-list-head"><h1>Chats</h1>{canReadMessages&&<Link to={`/whatsapp/history?account=${externalAccount??accountFilter}`} aria-label="Browse WhatsApp history" title="Browse WhatsApp history"><WhatsAppIcon name="clock" size={20}/></Link>}{canSend&&<button aria-label="New chat" title="New chat" onClick={()=>setComposing(true)}>?</button>}<button aria-label="WhatsApp chat settings" title="WhatsApp chat settings" onClick={()=>setShowContext(v=>!v)}>?</button></header>}
           <div className="inbox-search">
-            <input placeholder="Search people or groups…" value={search} onChange={(e) => setSearch(e.target.value)} />
+            <input aria-label="Search conversations" placeholder="Search people or groups…" value={search} onChange={(e) => setSearch(e.target.value)} />
           </div>
           <div className="inbox-tabs">
             {(['all', 'users', 'groups'] as const).map((name) => (
@@ -513,23 +589,38 @@ export function ConversationsPage() {
             ))}
           </div>
 
+          <div className="inbox-organize">
+            <select aria-label="Inbox view" value={inboxView} onChange={e=>{setInboxView(e.target.value as typeof inboxView);setChecked(new Set());}}>
+              <option value="active">Active inbox</option><option value="unread">Unread</option><option value="archived">Archived</option>
+            </select>
+            <span className="muted small">Your view · latest 100 conversations</span>
+            {checked.size>0&&<div className="inbox-bulk" aria-label="Selected conversation actions">
+              <span className="small">{checked.size} selected</span>
+              <button disabled={organizing} onClick={()=>void organize(inboxView==='archived'?'UNARCHIVE':'ARCHIVE',[...checked])}>{inboxView==='archived'?'Unarchive':'Archive'}</button>
+              <button disabled={organizing} onClick={()=>void organize('MARK_UNREAD',[...checked])}>Mark unread</button>
+              {canManage&&<><button disabled={organizing} onClick={()=>void organize('PIN',[...checked])}>Pin</button><button disabled={organizing} onClick={()=>void organize('UNPIN',[...checked])}>Unpin</button></>}
+              <button disabled={organizing} onClick={()=>setChecked(new Set())}>Clear selection</button>
+            </div>}
+          </div>
           <div className="inbox-list">
             {listError && (
               <div style={{ padding: 14 }}>
                 <ErrorState message={listError} onRetry={() => void loadDirectory()} icon={<IconAlertCircle size={20} />} />
               </div>
             )}
-            {listLoading && destinations.length === 0 && !listError && (
+            {listLoading && visibleDestinations.length === 0 && !listError && (
               <div style={{ padding: 14 }}>
                 <Skeleton lines={8} />
               </div>
             )}
-            {!listLoading && destinations.length === 0 && !listError && (
+            {!listLoading && visibleDestinations.length === 0 && !listError && (
               <Empty
-                title={search ? 'Nothing matches' : 'No conversations yet'}
+                title={inboxView==='archived'?'No archived conversations':inboxView==='unread'?'No unread conversations':search ? 'Nothing matches' : 'No conversations yet'}
                 hint={
                   search
                     ? 'Try a different name or number.'
+                    : inboxView==='archived'?'Archived conversations remain available here until you unarchive them.'
+                    : inboxView==='unread'?'No unread conversations in the loaded directory.'
                     : singleConnected.length === 0
                       ? 'Link a WhatsApp account, then sync its groups to message them.'
                       : 'Messages from your connected accounts appear here. Sync an account’s groups to message them first.'
@@ -538,9 +629,10 @@ export function ConversationsPage() {
               />
             )}
 
-            {destinations.map((item) => (
+            {visibleDestinations.map((item) => (
+              <div className="inbox-select-row" key={item.key}>
+                {item.conversation&&<input type="checkbox" aria-label={`Select ${item.name}`} checked={checked.has(item.conversation.id)} disabled={organizing||(!checked.has(item.conversation.id)&&checked.size>=50)} onChange={e=>{const id=item.conversation!.id;setChecked(current=>{const next=new Set(current);if(e.target.checked)next.add(id);else next.delete(id);return next;});}}/>}
               <button
-                key={item.key}
                 type="button"
                 className={item.key === selectedKey ? 'conv-item active' : 'conv-item'}
                 onClick={() => setSelectedKey(item.key)}
@@ -558,6 +650,9 @@ export function ConversationsPage() {
                     </div>
                     <div className="conv-item-preview">{item.conversation?.lastMessagePreview ?? item.subtitle}</div>
                     <div className="conv-item-tags">
+                      {item.conversation?.isPinned&&<Badge>Pinned</Badge>}
+                      {Boolean(item.conversation?.unreadCount)&&<Badge tone="busy">{item.conversation?.unreadCount} unread</Badge>}
+                      {!item.conversation?.unreadCount&&item.conversation?.markedUnread&&<Badge tone="busy">Unread</Badge>}
                       {item.conversation && (
                         <Badge tone={statusTone(item.conversation.status)}>{humanise(item.conversation.status)}</Badge>
                       )}
@@ -570,12 +665,14 @@ export function ConversationsPage() {
                   </div>
                 </div>
               </button>
+              </div>
             ))}
           </div>
         </div>
 
         {/* --- thread ------------------------------------------------------------------------- */}
         <div className="inbox-pane">
+          {embedded&&<button className="wa-close-context" aria-label="Close conversation information" onClick={()=>setShowContext(false)}><WhatsAppIcon name="close"/></button>}
           {!destination ? (
             <Empty
               title="Select a contact or group"
@@ -585,22 +682,28 @@ export function ConversationsPage() {
           ) : (
             <>
               <div className="thread-head" style={{ flexWrap: 'wrap' }}>
+                {embedded&&<button className="wa-chat-back" aria-label="Back to chats" onClick={()=>setSelectedKey(null)}><WhatsAppIcon name="back"/></button>}
                 <span className={destination.kind === 'GROUP' ? 'conv-avatar group' : 'conv-avatar'}>
                   {destination.kind === 'GROUP' ? <IconUsers size={16} /> : <IconMessageCircle size={16} />}
                 </span>
                 <div style={{ flex: 1, minWidth: 0, overflowWrap: 'anywhere' }}>
                   <div className="thread-head-title">{destination.name}</div>
                   <div className="muted small">
-                    {destination.subtitle}
+                    {presence||destination.subtitle}
                     {sendingAccount && ` · ${sendingAccount.name}`}
                   </div>
                 </div>
 
+                {embedded&&<button className="wa-chat-info-toggle" aria-label="Search and saved replies" onClick={()=>setShowSearch(v=>!v)}><WhatsAppIcon name="search"/></button>}
+                {embedded&&<button className="wa-chat-info-toggle" onClick={()=>setShowContext(v=>!v)} aria-label="Conversation information"><WhatsAppIcon name="account"/></button>}
                 {selected && (
-                  <>
+                  <details className={embedded?"wa-thread-actions":"crm-thread-actions"} open={embedded?undefined:true}><summary aria-label="Chat actions"><WhatsAppIcon name="more"/></summary><div>
                     <Badge tone={selected.controlState === 'HUMAN_ACTIVE' ? 'warn' : 'ok'}>
                       {selected.controlState === 'HUMAN_ACTIVE' ? 'Human' : 'Automation'}
                     </Badge>
+                    <button disabled={organizing} onClick={()=>void organize(selected.isArchived?'UNARCHIVE':'ARCHIVE',[selected.id])}>{selected.isArchived?'Unarchive':'Archive'}</button>
+                    <button disabled={organizing} onClick={()=>void organize('MARK_UNREAD',[selected.id])}>Mark unread</button>
+                    {canReadMessages&&<button disabled={organizing} onClick={()=>void markLoadedRead()}>Mark loaded read</button>}
                     {canManage && (
                       <select
                         value={selected.status}
@@ -621,10 +724,11 @@ export function ConversationsPage() {
                         {selected.controlState === 'HUMAN_ACTIVE' ? 'Release' : 'Take over'}
                       </button>
                     )}
-                  </>
+                  </div></details>
                 )}
               </div>
 
+              {embedded&&showSearch&&<div className="wa-chat-utilities"><input autoFocus aria-label="Search loaded messages" placeholder="Search this chat" value={threadSearch} onChange={e=>setThreadSearch(e.target.value)}/><select aria-label="Insert a saved reply" value="" onChange={e=>{const reply=savedReplies.find(r=>r.id===e.target.value);if(reply)updateDraft(draft?`${draft}\n${reply.body}`:reply.body);}}><option value="">Quick replies</option>{savedReplies.map(reply=><option key={reply.id} value={reply.id}>{reply.title}</option>)}</select><button aria-label="Close chat search" onClick={()=>{setShowSearch(false);setThreadSearch('');}}><WhatsAppIcon name="close"/></button></div>}
               {threadError && (
                 <div style={{ padding: 14 }}>
                   <ErrorState
@@ -634,6 +738,7 @@ export function ConversationsPage() {
                   />
                 </div>
               )}
+              {readError&&<div className="thread-notice" role="status">Read status could not be saved. Use Mark loaded read to retry.</div>}
 
               <div className="thread-messages" ref={scrollRef}>
                 {thread === null && <Loading label="Loading messages…" />}
@@ -670,10 +775,11 @@ export function ConversationsPage() {
                   return (
                     <div key={message.id}>
                       {showDay && <div className="thread-day">{dayLabel(message.sentAt)}</div>}
-                      <div id={`message-${message.id}`} className={`msg-row ${message.direction === 'OUTBOUND' ? 'outbound' : 'inbound'}`}>
+                      {message.id===unreadAnchor&&<div className="thread-unread" role="separator" aria-label="First unread message">Unread messages</div>}
+                      <div id={`message-${message.id}`} data-readable-message={message.direction==='INBOUND'?message.id:undefined} className={`msg-row ${message.direction === 'OUTBOUND' ? 'outbound' : 'inbound'}`}>
                         <div className={`msg-bubble${automated ? ' automated' : ''}`} style={{ overflowWrap: 'anywhere' }}>
-                          {message.quotedExternalId && <div className="message-quote"><span>Quoted message</span>{(() => { const original = thread?.find(m => m.externalId === message.quotedExternalId); return original ? <a href={`#message-${original.id}`}>{original.body?.slice(0, 150) || humanise(original.contentType)}</a> : <small>Original message is outside the loaded history.</small>; })()}</div>}
-                          {message.contentType === 'TEXT' ? <MessageText body={message.body ?? ''} /> : `[${humanise(message.contentType)}]`}
+                          {message.quotedExternalId && <div className="message-quote"><span>Quoted message</span>{(() => { const original = thread?.find(m => m.externalId === message.quotedExternalId||m.id===message.quotedMessageId); return original ? <a href={`#message-${original.id}`}>{original.body?.slice(0, 150) || humanise(original.contentType)}</a> : <small>Original message is outside the loaded history.</small>; })()}</div>}
+                          <WhatsAppMessageContent message={message} accountId={sendingAccount?.id??destination.channelAccountId??''}/>
                           <div className="msg-meta">
                             {message.direction === 'INBOUND'
                               ? (message.senderDisplayName ?? 'Customer')
@@ -684,6 +790,7 @@ export function ConversationsPage() {
                             <RelativeTime value={message.sentAt} />
                             {message.deliveryStatus ? ` · ${humanise(message.deliveryStatus)}` : ''}
                             {canSend && message.externalId && <button className="message-reply" onClick={() => setQuoted(message)} aria-label={`Reply to message from ${message.senderDisplayName || 'sender'}`}>Reply</button>}
+                            {embedded&&canSend&&message.externalId&&<details className="wa-message-menu"><summary aria-label="Message actions"><WhatsAppIcon name="more" size={16}/></summary><div>{[['reactMessage','React'],['forwardMessage','Forward'],[message.presentation?.starred?'unstarMessage':'starMessage',message.presentation?.starred?'Unstar':'Star'],...(message.fromAccount?[['updateMessage','Edit'],['revokeMessage','Delete for everyone']]:[]),['deleteMessage','Delete for me'],['readMessage','Mark read'],...(message.contentType==='AUDIO'?[['markMessagePlayed','Mark played']]:[])].map(([operation,label])=><button key={operation} onClick={e=>{e.currentTarget.closest('details')?.removeAttribute('open');setChatTool({operation,message});}}>{label}</button>)}</div></details>}
                           </div>
                         </div>
                       </div>
@@ -733,11 +840,12 @@ export function ConversationsPage() {
               {canSend && (
                 quoted && <div className="composer-quote"><div><strong>Replying to {quoted.senderDisplayName || 'message'}</strong><p>{quoted.body?.slice(0,150) || humanise(quoted.contentType)}</p></div><button aria-label="Cancel quoted reply" onClick={() => setQuoted(null)}>×</button></div>
               )}
-              {canSend && (
+              {canSend && !embedded && (
                 <div className="composer-tools"><select aria-label="Insert saved reply" value="" onChange={e => { const reply = savedReplies.find(r => r.id === e.target.value); if (reply) updateDraft(draft ? `${draft}\n${reply.body}` : reply.body); }}><option value="">Saved replies…</option>{savedReplies.map(r => <option key={r.id} value={r.id}>{r.title}</option>)}</select><Link to="/saved-replies" className="small">Manage replies</Link><input aria-label="Search loaded messages" placeholder="Search loaded messages…" value={threadSearch} onChange={e => setThreadSearch(e.target.value)} /></div>
               )}
               {canSend && (
                 <div className="thread-compose">
+                  {embedded&&<WhatsAppComposerExtras disabled={!sendability.ready} accountId={sendingAccount?.id??destination.channelAccountId??''} phone={destination.externalId} onTool={operation=>setChatTool({operation,message:quoted??undefined})} onEmoji={emoji=>updateDraft(draft+emoji)} onQueued={()=>toast.success('Message queued.')} /> }
                   <textarea
                     rows={2}
                     placeholder={
@@ -773,6 +881,7 @@ export function ConversationsPage() {
 
         {/* --- context ------------------------------------------------------------------------ */}
         <div className="inbox-pane">
+          {embedded&&<button className="wa-close-context" aria-label="Close conversation information" onClick={()=>setShowContext(false)}><WhatsAppIcon name="close"/></button>}
           {!destination ? (
             <div className="info-pane-section">
               <div className="muted small">Select a conversation to see its context.</div>
@@ -918,6 +1027,7 @@ export function ConversationsPage() {
         </div>
       </div>
 
+      {chatTool&&destination&&sendingAccount&&<WhatsAppChatTool key={`${destination.key}:${chatTool.operation}:${chatTool.message?.id??''}`} accountId={sendingAccount.id} phone={destination.externalId} operation={chatTool.operation} message={chatTool.message} draft={draft} onClose={()=>setChatTool(null)} onQueued={()=>toast.success('WhatsApp action queued.')}/>}
       {composing && (
         <NewMessageDialog
           destinations={destinations}
@@ -929,7 +1039,7 @@ export function ConversationsPage() {
           }}
         />
       )}
-    </>
+    </section>
   );
 }
 

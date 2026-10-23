@@ -16,7 +16,19 @@ import { ChannelRegistryService } from './channel-registry.service';
 import { ChannelAccount } from './entities/channel-account.entity';
 import { ChannelConnectionEvent } from './entities/channel-connection-event.entity';
 import { Channel } from './entities/channel.entity';
-import { OpenWaClient } from './whatsapp/openwa.client';
+import { GoWaClient } from './whatsapp/gowa.client';
+import { GoWaCatalogue } from './whatsapp/gowa-catalogue';
+import { GoWaCommandExecutor } from './whatsapp/gowa-command.executor';
+import { GoWaMcpController } from './whatsapp/gowa-mcp.controller';
+import { GoWaHistoryService } from './whatsapp/gowa-history.service';
+import { GoWaIntegrationService } from './whatsapp/gowa-integration.service';
+import { GoWaIntegrationController } from './whatsapp/gowa-integration.controller';
+import { GoWaMediaService } from './whatsapp/gowa-media.service';
+import { GoWaScheduleService } from './whatsapp/gowa-schedule.service';
+import { GoWaToolsService } from './whatsapp/gowa-tools.service';
+import { GoWaToolsController } from './whatsapp/gowa-tools.controller';
+import { GoWaActionHandler } from './whatsapp/gowa-action.handler';
+import { StorageService } from '../../common/storage/storage.service';
 import { WhatsAppAutomationGuard } from './whatsapp/whatsapp-automation.guard';
 import { WhatsAppChannelAdapter } from './whatsapp/whatsapp.adapter';
 import { WhatsAppController } from './whatsapp/whatsapp.controller';
@@ -38,7 +50,7 @@ const isWorker = process.env.RUN_MODE === 'worker';
   imports: [
     forwardRef(() => BroadcastModule),
     TypeOrmModule.forFeature([Channel, ChannelAccount, ChannelConnectionEvent]),
-    BullModule.registerQueue({ name: QUEUES.CHANNEL_MAINTENANCE }),
+    BullModule.registerQueue({ name: QUEUES.CHANNEL_MAINTENANCE },{name:QUEUES.MESSAGE_OUTGOING},{name:QUEUES.JOB_CENTER}),
     RealtimeModule,
     JobsModule,
     // The WhatsApp Accounts overview counts groups per account in one query.
@@ -48,15 +60,17 @@ const isWorker = process.env.RUN_MODE === 'worker';
     forwardRef(() => IngestionModule),
     forwardRef(() => MessagingModule),
   ],
-  controllers: [ChannelController, WhatsAppController],
+  controllers: [ChannelController, WhatsAppController,GoWaToolsController,GoWaIntegrationController,GoWaMcpController],
   providers: [
     ChannelRegistryService,
     ChannelAccountService,
     ChannelRecoveryService,
-    OpenWaClient,
+    GoWaClient,
+    GoWaCatalogue,GoWaCommandExecutor,
+    StorageService,GoWaToolsService,GoWaScheduleService,GoWaMediaService,GoWaIntegrationService,GoWaHistoryService,
     WhatsAppChannelAdapter,
     WhatsAppAutomationGuard,
-    ...(isWorker ? [ChannelMaintenanceProcessor] : []),
+    ...(isWorker ? [ChannelMaintenanceProcessor,GoWaActionHandler] : []),
   ],
   exports: [
     ChannelRegistryService,

@@ -218,7 +218,8 @@ export function isGroupJid(jid: string | null | undefined): boolean {
  * message stamped in 1970 or in 2153 would corrupt every ordered query and every report that
  * touches it, and the value comes from outside our trust boundary.
  */
-export function toDate(epochSeconds: number | null | undefined): Date {
+export function toDate(epochSeconds: number | string | null | undefined): Date {
+  if(typeof epochSeconds==='string'){const value=new Date(epochSeconds);return Number.isFinite(+value)&&+value>=946684800000?value:new Date();}
   if (typeof epochSeconds !== 'number' || !Number.isFinite(epochSeconds)) return new Date();
   const ms = epochSeconds * 1000;
   const year2000 = 946_684_800_000;
